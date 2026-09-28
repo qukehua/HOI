@@ -1,0 +1,8 @@
+{
+  "entries": [
+    {"modality": "human", "frames": [0], "from_reference": true},
+    {"modality": "object", "frames": [0, 7], "features": [0, 1, 2], "from_reference": true},
+    {"modality": "contact", "start": 2, "end": 6, "joints": [20], "values": 1},
+    {"modality": "contact", "frames": [0, 7], "joints": [20], "values": 0}
+  ]
+}

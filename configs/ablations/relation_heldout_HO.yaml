@@ -1,0 +1,32 @@
+manifest: data/processed/omomo_combined.jsonl
+output: runs/relation_heldout_HO
+seed: 42
+device: auto
+cpu_threads: 4
+workers: 0
+window: 120
+stride: 60
+batch_size: 8
+balance_datasets: true
+max_steps: 100000
+learning_rate: 0.0001
+weight_decay: 0.01
+gradient_clip: 1.0
+ema_decay: 0.999
+diffusion_steps: 1000
+geometry_weight: 0.05
+text_dropout: 0.1
+log_every: 20
+save_every: 1000
+validate_every: 1000
+validation_batches: 20
+holdout_signatures:
+- H+O
+model:
+  width: 192
+  heads: 6
+  layers: 4
+  dropout: 0.1
+  text_dim: 512
+  relations: true
+  two_stage: true

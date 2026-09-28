@@ -1,0 +1,7 @@
+{
+  "entries": [
+    {"modality": "human", "frames": [0], "joints": [0], "features": [0, 1, 2], "values": [0, 1, 0]},
+    {"modality": "object", "frames": [0, 7], "features": [0, 1, 2], "values": [[0.4, 0.8, 0], [0.7, 0.8, 0]]},
+    {"modality": "contact", "start": 2, "end": 6, "joints": [20], "values": 1}
+  ]
+}

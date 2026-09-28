@@ -1,0 +1,28 @@
+# CPU wiring check only. This is deliberately too small/short for research quality.
+manifest: data/processed/omomo_smoke_train/manifest.jsonl
+output: runs/smoke_real_omomo
+seed: 42
+device: cpu
+cpu_threads: 4
+workers: 0
+window: 8
+stride: 8
+batch_size: 2
+balance_datasets: true
+max_steps: 4
+learning_rate: 0.0001
+ema_decay: 0.9
+diffusion_steps: 20
+geometry_weight: 0.01
+log_every: 1
+save_every: 2
+validate_every: 4
+validation_batches: 1
+model:
+  width: 24
+  heads: 4
+  layers: 1
+  dropout: 0.0
+  text_dim: 512
+  relations: true
+  two_stage: true

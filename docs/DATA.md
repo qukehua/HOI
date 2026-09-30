@@ -223,10 +223,9 @@ have no positive joint-to-surface contact proxy labels; no contacts were invente
 See `data/processed/behave/conversion_report.json`, `verification_report.json`,
 and `verification_per_sequence.jsonl`.
 
-The combined BEHAVE + OMOMO manifest is `data/processed/combined.jsonl`:
-5,029 records and 439,321 frames, split into 3,991 train / 439 validation / 599 test.
-It contains full converted datasets only, with relative paths and no smoke-subset
-duplicates. All three splits pass complete record loading and a mixed BEHAVE/OMOMO
-batch check, with zero missing files; see `data/processed/combined_verification_report.json`.
-Linux/CUDA validation and formal training remain pending; the OMOMO
-source-fps assumption still applies even though both datasets are stored at 10 fps.
+BEHAVE and OMOMO are trained and validated separately. Use
+`data/processed/behave/manifest.jsonl` for BEHAVE-only runs and
+`data/processed/omomo_combined.jsonl` for OMOMO-only runs. Do not merge them into
+a joint training manifest. Linux/CUDA validation and formal training remain
+pending; the OMOMO source-fps assumption still applies even though both datasets
+are stored at 10 fps.

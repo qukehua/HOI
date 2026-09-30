@@ -21,12 +21,12 @@
 
 这里训练的是新增的统一 H/O/C 时序模型，**从头训练**。不需要先训练 TriDi 或 Kimodo，也不需要把它们的预训练权重加载进来。Kimodo 预训练人体生成属于训练好 HOI 之后可选的输入来源；两篇论文的检查点不兼容本项目网络。
 
-当前可以走两条路径：
+当前在两个数据集上**分开训练、分开验证**，不把 BEHAVE 与 OMOMO 混进同一清单联合训练：
 
 | 路径 | 当前状态 | 训练清单 |
 | --- | --- | --- |
-| 先训练 OMOMO | 已转换完成，可直接使用；3797 train / 422 val / 517 test | `data/processed/omomo_combined.jsonl` |
-| BEHAVE + OMOMO 联合训练 | 已完成转换和合并；3991 train / 439 val / 599 test | `data/processed/combined.jsonl` |
+| OMOMO | 已转换完成，可直接使用；3797 train / 422 val / 517 test | `data/processed/omomo_combined.jsonl` |
+| BEHAVE | 已转换完成，可直接使用；194 train / 17 val / 82 test | `data/processed/behave/manifest.jsonl` |
 
 **以下所有命令均在 Linux 训练服务器的 Bash 终端执行**，从服务器上的项目根目录运行。示例 `/path/to/HOI` 需替换成服务器实际路径，不是 Windows 的 `D:/code/HOI`。已有数据数量和 CPU 检查结果来自本机准备阶段；迁移后须重新检查，**尚未在服务器验证 CUDA 或完成正式训练**。
 
@@ -38,7 +38,7 @@
 
 | 目录 | 服务器上的处理方式 |
 | --- | --- |
-| `data/processed/` | 复制清单、对应 `sequences/*.npz` 和已有文本特征；BEHAVE、OMOMO 及联合清单均已准备 |
+| `data/processed/` | 复制清单、对应 `sequences/*.npz` 和已有文本特征；BEHAVE 与 OMOMO 清单均已准备 |
 | `data/processed/omomo_smoke_train/`、`data/processed/omomo_smoke_test/` | 第3步的小规模检查依赖这两份数据，也需复制 |
 | `OMOMO/data/` | 重做 OMOMO 转换时需要；已有完整转换结果时，训练本身不读取原始数据 |
 | `data/raw/behave/` | 使用 BEHAVE 时复制已下载和解压的数据，或按附录在服务器重新下载 |
@@ -132,10 +132,16 @@ python -c "from collections import Counter; from pathlib import Path; from unifi
 
 - BEHAVE 清单：`data/processed/behave/manifest.jsonl`；动作文件：`data/processed/behave/sequences/`。
 - 逐条校验：`data/processed/behave/verification_report.json`；所有输出通过格式、有限值、时间戳、骨架一致性、物体位姿及接触代理检查。
-- 联合清单：`data/processed/combined.jsonl`，共5029条、439321帧；只合并完整 BEHAVE/OMOMO 数据，没有混入 smoke 子集。
-- 联合读取检查：`data/processed/combined_verification_report.json`；三个划分均完成全量记录加载及 BEHAVE/OMOMO 混合 batch 检查，文件缺失数为0。
 
-**复制已有转换结果到 Linux 后，可以跳过下面的模型准备、转换和合并命令，直接按第4步设置联合训练配置。** 保留 `data/processed/behave/`、`omomo_train/`、`omomo_test/` 与 `combined.jsonl` 的相对目录结构。下面的步骤用于在新目录从原始数据重建，已有输出不应重复覆盖。
+检查 BEHAVE 清单与文件是否可用：
+
+```bash
+python -c "from collections import Counter; from pathlib import Path; from unified_hoi.data import read_manifest; r=read_manifest('data/processed/behave/manifest.jsonl'); print(dict(Counter(x['split'] for x in r))); missing=[x['path'] for x in r if not Path(x['path']).is_file()]; print('missing:',len(missing)); assert not missing"
+```
+
+当前应为 `train=194, val=17, test=82`，缺失文件数为0。
+
+**复制已有转换结果到 Linux 后，可以跳过下面的模型准备与转换命令，直接按第4–5步分别配置 OMOMO 或 BEHAVE 训练。** 保留 `data/processed/behave/`、`omomo_train/`、`omomo_test/` 的相对目录结构。下面的步骤用于在新目录从原始数据重建，已有输出不应重复覆盖。
 
 已下载到 `data/raw/behave`：`objects.zip`、`behave-30fps-params-v1.tar`、`split.json`，已解压为299个序列和20个物体。**这些参数文件不包含 SMPL-H 身体模型**。
 
@@ -187,25 +193,15 @@ python -m unified_hoi.preprocess behave \
   --output data/processed/behave
 ```
 
-检查 `data/processed/behave/conversion_report.json` 的写入数量与拒绝原因；不要仅看到生成目录就认为转换成功。然后合并：
+检查 `data/processed/behave/conversion_report.json` 的写入数量与拒绝原因；不要仅看到生成目录就认为转换成功。BEHAVE 与 OMOMO 各自使用独立清单训练，不要再合并成联合清单。BEHAVE使用官方train/test划分，并只从train划出val。其30fps测试序列协议不等于TriDi原文的静态1fps测试设置，不能直接把本项目结果与其原表格作数值比较。
 
-```bash
-python scripts/combine_manifests.py \
-  data/processed/behave/manifest.jsonl \
-  data/processed/omomo_train/manifest.jsonl \
-  data/processed/omomo_test/manifest.jsonl \
-  --output data/processed/combined.jsonl
-```
-
-两数据集需使用相同fps和点数；混合fps或点数会被加载器拒绝。BEHAVE使用官方train/test划分，并只从train划出val。其30fps测试序列协议不等于TriDi原文的静态1fps测试设置，不能直接把本项目结果与其原表格作数值比较。
-
-已经训练OMOMO后再加入BEHAVE，会改变数据清单与归一化；当前严格续训入口不支持这样更换数据。应新建联合训练实验，从头训练；跨数据集微调尚无专门入口。
+更换数据集（例如从 OMOMO 换成 BEHAVE）会改变数据清单与归一化；当前严格续训入口不支持这样更换数据。应新建实验从头训练。
 
 ### 2.3 可选：启用文本条件
 
 **清单里有文字，不代表模型已经获得文本特征。** 当前完整清单没有CLIP特征缓存；不做这一步时，模型按无文本条件训练，仍可使用人体、物体、接触控制。
 
-若需要文本条件，必须在正式训练前缓存真实标注。下面以OMOMO为例；联合训练时替换为 `combined.jsonl` 及独立的输出文件名：
+若需要文本条件，必须在正式训练前缓存真实标注。下面以OMOMO为例；BEHAVE 则换成对应清单与输出文件名：
 
 ```bash
 python -m pip install -e ".[text]"
@@ -249,13 +245,14 @@ python scripts/smoke_pipeline.py \
 
 ```bash
 cp -n configs/unified.yaml configs/train_omomo.yaml
+cp -n configs/unified.yaml configs/train_behave.yaml
 ```
 
-编辑 `configs/train_omomo.yaml`。OMOMO无文本基线的关键参数如下；保留复制文件中的其他字段：
+分别编辑对应配置。OMOMO / BEHAVE 无文本基线的关键参数如下；保留复制文件中的其他字段。仓库已提供 `configs/train_omomo.yaml` 与 `configs/train_behave.yaml`，可直接检查后使用：
 
 | 参数 | 起始设置 | 含义与注意点 |
 | --- | --- | --- |
-| `manifest` | `data/processed/omomo_combined.jsonl` | 联合训练改为 `combined.jsonl`；有文本时用缓存清单 |
+| `manifest` | OMOMO：`data/processed/omomo_combined.jsonl`；BEHAVE：`data/processed/behave/manifest.jsonl` | 两个数据集分开训练，各自用自己的清单；有文本时用缓存清单 |
 | `device` | `cuda:0` | 正式实验明确指定GPU；默认 `auto` 在没有CUDA时会退回CPU |
 | `seed` | `42` | 不同随机种子作为独立实验 |
 | `window / stride` | `120 / 60` | 10fps下最多12秒窗口、6秒步进；短片段用有效帧mask补齐 |
@@ -263,7 +260,7 @@ cp -n configs/unified.yaml configs/train_omomo.yaml
 | `workers` | `0` | 先使用单进程读取排查数据；Linux 上可再按 CPU、内存与存储吞吐调整并行读取 |
 | `learning_rate` | `0.0001` | AdamW固定学习率，当前没有学习率调度器 |
 | `max_steps` | `100000` | 总优化步数，是初始预算，不是保证收敛的步数 |
-| `balance_datasets` | `true` | 按窗口数反比采样，使数据集总采样权重均衡；不保证每个batch各占一半 |
+| `balance_datasets` | `true` | 单数据集清单时等价于均匀采样；若清单内出现多来源标签再按窗口数反比加权 |
 | `diffusion_steps` | `1000` | 训练噪声时间步数；与推理 `--steps 50` 不同 |
 | `geometry_weight` | `0.05` | 几何损失权重 |
 | `ema_decay` | `0.999` | 采样/评估默认使用EMA权重 |
@@ -289,7 +286,9 @@ source .venv/bin/activate
 
 运行期间按 `Ctrl+B`，松开后按 `D` 可分离会话；重连 SSH 后用 `tmux attach -t hoi_train` 返回。每个命令块中的 `\` 是 Bash 续行符，必须是该行最后一个字符，后面不要加空格。
 
-先在完整数据、正式模型和GPU上跑1000步，验证显存、日志、周期验证与保存均正常：
+先在完整数据、正式模型和GPU上跑1000步，验证显存、日志、周期验证与保存均正常。
+
+OMOMO：
 
 ```bash
 python -c "import torch; assert torch.cuda.is_available(), 'CUDA unavailable'"
@@ -297,19 +296,19 @@ python -c "import torch; assert torch.cuda.is_available(), 'CUDA unavailable'"
 python -m unified_hoi.train \
   --config configs/train_omomo.yaml \
   --manifest data/processed/omomo_combined.jsonl \
-  --output runs/omomo_seed42 
+  --output runs/omomo_seed42
 ```
 
-有文本条件时，把上述 `--manifest` 换成 `data/processed/omomo_with_text.jsonl`；续训也必须使用相同值。联合训练使用新配置文件和新目录，例如：
+BEHAVE（与 OMOMO 分开训练，使用独立配置与输出目录）：
 
 ```bash
-# 仅完成BEHAVE转换和合并后执行；先按第4步准备对应配置
-cp -n configs/train_omomo.yaml configs/train_behave_omomo.yaml
 python -m unified_hoi.train \
-  --config configs/train_behave_omomo.yaml \
-  --manifest data/processed/combined.jsonl \
-  --output runs/behave_omomo_seed42 \
+  --config configs/train_behave.yaml \
+  --manifest data/processed/behave/manifest.jsonl \
+  --output runs/behave_seed42
 ```
+
+有文本条件时，把上述 `--manifest` 换成对应的带缓存清单；续训也必须使用相同值。
 
 首次训练会先扫描train窗口并计算归一化统计，之后才开始打印优化损失；这阶段可能没有逐步日志。归一化不会使用val/test。训练中的随机mask自动覆盖多种条件，不需要给human→object、object→human分别启动不同模型。
 
@@ -329,9 +328,12 @@ python -m unified_hoi.train \
 cat runs/omomo_seed42/run_info.json
 tail -n 5 runs/omomo_seed42/train.jsonl
 tail -n 5 runs/omomo_seed42/validation.jsonl
+
+# BEHAVE 同理，把目录换成 runs/behave_seed42
+cat runs/behave_seed42/run_info.json
 ```
 
-1000步完成后，先保留这个检查点，再继续到总计100000步：
+1000步完成后，先保留这个检查点，再继续到总计100000步。以 OMOMO 为例（BEHAVE 把配置、清单与输出目录换成 `train_behave.yaml` / `behave/manifest.jsonl` / `runs/behave_seed42`）：
 
 ```bash
 cp -n runs/omomo_seed42/last.pt runs/omomo_seed42/step_001000.pt
@@ -424,7 +426,7 @@ python scripts/benchmark.py \
   --output runs/eval_omomo_seed42_check
 ```
 
-下面分别评估两个数据集。检查点路径替换成实际训练结果：
+下面分别评估两个数据集。检查点与清单必须来自**同一数据集上的训练**，不要用 OMOMO 检查点去评 BEHAVE，或反过来：
 
 ```bash
 python scripts/benchmark.py \
@@ -434,13 +436,13 @@ python scripts/benchmark.py \
   --output runs/eval_omomo_seed42_raw --save-predictions
 
 python scripts/benchmark.py \
-  --checkpoint runs/omomo_seed42/last.pt \
+  --checkpoint runs/behave_seed42/last.pt \
   --manifest data/processed/behave/manifest.jsonl \
   --modes 011 --window 120 --steps 50 --seed 42 \
   --output runs/eval_behave_seed42_raw --save-predictions
 ```
 
-也可传 `data/processed/combined.jsonl`；不指定modes时，会自动对OMOMO跑101、对BEHAVE跑011，并按数据集/任务分组汇总。默认关闭文本条件，即使清单存在文本缓存也不会自动使用。对OMOMO复现“物体+文本→人体”设置时，需要文本训练的检查点、带缓存清单及 `--text-conditioned`。
+不指定 `--modes` 时，会按记录的 dataset 字段自动对 OMOMO 跑 101、对 BEHAVE 跑 011，并按数据集/任务分组汇总。默认关闭文本条件，即使清单存在文本缓存也不会自动使用。对OMOMO复现“物体+文本→人体”设置时，需要文本训练的检查点、带缓存清单及 `--text-conditioned`。
 
 输出 `per_clip.jsonl` 和 `summary.json`。主指标位于summary的 `metrics`；按窗口宏平均和按帧加权均值分列，原有锚点、FK、滑移、地板及耗时诊断位于 `diagnostics_by_dataset_mode`。不要混用两种聚合方式。OMOMO原版代码支持best-of-20；本项目默认单样本，需要这一对照时传 `--samples-per-window 20 --modes 101`，以最小MPJPE选出同一个样本计算所有指标，并如实报告采样预算。Uni-HOI是否使用相同预算尚未确认。
 

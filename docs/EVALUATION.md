@@ -170,11 +170,16 @@ reference evaluator's actual protocol. The CLI requires them explicitly.
 ## Entry points and aggregation
 
 ```bash
-# Default mapping on a combined test manifest: OMOMO 101; BEHAVE 011.
+# Evaluate each dataset with the checkpoint trained on that dataset.
 python scripts/benchmark.py \
   --checkpoint runs/omomo_seed42/last.pt \
-  --manifest data/processed/combined.jsonl \
-  --output runs/eval_uni_hoi --save-predictions
+  --manifest data/processed/omomo_combined.jsonl \
+  --modes 101 --output runs/eval_omomo --save-predictions
+
+python scripts/benchmark.py \
+  --checkpoint runs/behave_seed42/last.pt \
+  --manifest data/processed/behave/manifest.jsonl \
+  --modes 011 --output runs/eval_behave --save-predictions
 
 # Existing mixed-control experiments remain available.
 python scripts/benchmark.py \

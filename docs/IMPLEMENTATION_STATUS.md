@@ -6,8 +6,8 @@
 
 | 数据 | 已完成 | 尚需处理 |
 |---|---|---|
-| BEHAVE | 299条源序列已处理；293条完成真实 SMPL-H 转换，共147520帧、18种交互物体；6条因不在官方划分中而跳过；逐条数据校验通过 | 迁移到 Linux 后进行双数据集训练 |
-| OMOMO | 已读取用户解压数据；全量转换并保留4736条序列、291801帧 | 源fps仍为30的显式假设，未由发布元数据确认 |
+| BEHAVE | 299条源序列已处理；293条完成真实 SMPL-H 转换，共147520帧、18种交互物体；6条因不在官方划分中而跳过；逐条数据校验通过 | 迁移到 Linux 后单独训练与验证 |
+| OMOMO | 已读取用户解压数据；全量转换并保留4736条序列、291801帧 | 源fps仍为30的显式假设，未由发布元数据确认；与 BEHAVE 分开训练 |
 | 官方文本 | 4912条序列级标注已提取；保留数据中4669条有匹配文本 | 可选CLIP缓存未下载/运行；本次训练使用无文本条件 |
 
 完整 OMOMO 划分为 **3797 train / 422 val / 517 test**；先按源序列分组，再生成时间窗口。测试受试者sub16/17没有进入train/val。全量清单位于 `data/processed/omomo_combined.jsonl`，默认训练配置已指向它。
@@ -16,9 +16,7 @@
 
 SMPL-H 不随本代码分发，下载资产仍被 Git 忽略。本地已取得官网兼容版 `smplx.zip`，原包在 `data/raw/smplh/`，男女 `.pkl` 模型在 `data/smplx_models/smplh/`。真实模型以 `num_betas=10, use_pca=False` 通过 CPU 加载及前向检查，网格形状均为 `[1,6890,3]`；下载检查见 `data/smplx_models/smplh_download_report.json`。
 
-BEHAVE 全量转换随后在本机 CPU 完成：10fps、1024点、194 train / 17 val / 82 test。所有293条输出与原始时间戳、物体位姿逐条核对，最大骨架重建误差约 `7.46e-7 m`；接触标签与5cm采样表面距离定义一致。5条序列没有正接触代理标签，未将其伪造为有接触。完整记录见 `data/processed/behave/conversion_report.json`、`verification_report.json` 和 `verification_per_sequence.jsonl`。
-
-联合清单 `data/processed/combined.jsonl` 含 **5029条、439321帧，3991 train / 439 val / 599 test**。源序列划分保持不变，不混入 smoke 子集。三个划分均完成全量记录加载及双数据集混合 batch 检查，文件缺失数为0；120帧窗口、60帧步进时分别产生7341 / 791 / 1397个窗口。结果见 `data/processed/combined_verification_report.json`；Linux/CUDA 与正式模型训练尚未验证。
+BEHAVE 全量转换随后在本机 CPU 完成：10fps、1024点、194 train / 17 val / 82 test。所有293条输出与原始时间戳、物体位姿逐条核对，最大骨架重建误差约 `7.46e-7 m`；接触标签与5cm采样表面距离定义一致。5条序列没有正接触代理标签，未将其伪造为有接触。完整记录见 `data/processed/behave/conversion_report.json`、`verification_report.json` 和 `verification_per_sequence.jsonl`。清单位于 `data/processed/behave/manifest.jsonl`，与 OMOMO 分开训练/验证，不生成联合清单。
 
 ## 已跑过的流程
 

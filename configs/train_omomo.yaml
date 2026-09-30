@@ -1,7 +1,7 @@
 manifest: data/processed/omomo_combined.jsonl
-output: runs/unified
+output: runs/omomo_seed42
 seed: 42
-device: auto
+device: cuda:0
 cpu_threads: 4
 workers: 0
 window: 120

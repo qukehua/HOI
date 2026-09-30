@@ -22,10 +22,10 @@ validate_every: 1000
 validation_batches: 20
 save_best: true
 progress: true
-use_wandb: false
-wandb_project: unified-hoi
+use_wandb: true
+wandb_project: HOI
 wandb_run_name: null
-wandb_entity: null
+wandb_entity: qukehua-beijing-university-of-posts-and-telecommunications
 wandb_mode: online
 holdout_signatures: []
 model:

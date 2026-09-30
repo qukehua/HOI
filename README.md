@@ -297,8 +297,7 @@ python -c "import torch; assert torch.cuda.is_available(), 'CUDA unavailable'"
 python -m unified_hoi.train \
   --config configs/train_omomo.yaml \
   --manifest data/processed/omomo_combined.jsonl \
-  --output runs/omomo_seed42 \
-  --max-steps 1000
+  --output runs/omomo_seed42 
 ```
 
 有文本条件时，把上述 `--manifest` 换成 `data/processed/omomo_with_text.jsonl`；续训也必须使用相同值。联合训练使用新配置文件和新目录，例如：
@@ -310,7 +309,6 @@ python -m unified_hoi.train \
   --config configs/train_behave_omomo.yaml \
   --manifest data/processed/combined.jsonl \
   --output runs/behave_omomo_seed42 \
-  --max-steps 1000
 ```
 
 首次训练会先扫描train窗口并计算归一化统计，之后才开始打印优化损失；这阶段可能没有逐步日志。归一化不会使用val/test。训练中的随机mask自动覆盖多种条件，不需要给human→object、object→human分别启动不同模型。

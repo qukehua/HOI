@@ -112,6 +112,8 @@ def run_training(config, resume=None):
                                  weight_decay=config.get("weight_decay", .01))
     diffusion = HOIDiffusion(config.get("diffusion_steps", 1000))
     start_epoch = next_batch = step = 0
+    best_val_loss = float("inf")
+    best_step = None
     if resume:
         saved = torch.load(resume, map_location="cpu", weights_only=False)
         # Changing these changes the data order, loss or conditional task distribution.
@@ -129,13 +131,22 @@ def run_training(config, resume=None):
                     state[key] = value.to(device)
         start_epoch, next_batch, step = saved["epoch"], saved["next_batch"], saved["step"]
         restore_rng(saved["rng"])
+        if saved.get("best_val_loss") is not None:
+            best_val_loss = float(saved["best_val_loss"])
+            best_step = saved.get("best_step")
     output.mkdir(parents=True, exist_ok=True)
+    if best_step is None and (output / "best_info.json").exists():
+        best_info = json.loads((output / "best_info.json").read_text(encoding="utf-8"))
+        best_val_loss = float(best_info["loss"])
+        best_step = best_info.get("step")
     write_json(output / "config.json", config)
+    save_best = config.get("save_best", True)
     run_info = {
         "parameters": sum(p.numel() for p in model.parameters()), "device": str(device),
         "train_sequences": len(dataset.records), "train_windows": len(dataset),
         "validation_windows": len(validation), "torch": torch.__version__,
         "training_from_scratch": True, "physical_execution_validated": False,
+        "save_best": save_best,
         "reference_repos": {"tridi": "afa9631dc2b3a250588ab64026eeaa37f18f0d38",
                            "kimodo": "58e781898b3d7e328a676a75d3e338c45dce3ad9"}}
     write_json(output / "run_info.json", run_info)
@@ -145,11 +156,34 @@ def run_training(config, resume=None):
     if config.get("progress", True) and tqdm is None:
         print("Progress bar requested but tqdm is not installed. "
               "Install it with `pip install tqdm`.", flush=True)
+    if save_best and not len(validation):
+        print("save_best is enabled but the validation split is empty; "
+              "best.pt will not be written.", flush=True)
+
+    def checkpoint_payload(epoch, batch_index):
+        return {"schema_version": 1, "config": config, "model": model.state_dict(),
+                "ema": ema.state_dict(), "optimizer": optimizer.state_dict(), "step": step,
+                "epoch": epoch, "next_batch": batch_index, "rng": rng_state(),
+                "best_val_loss": None if best_val_loss == float("inf") else best_val_loss,
+                "best_step": best_step}
 
     def checkpoint(epoch, batch_index):
-        save_checkpoint(output / "last.pt", {"schema_version": 1, "config": config, "model": model.state_dict(),
-                        "ema": ema.state_dict(), "optimizer": optimizer.state_dict(), "step": step,
-                        "epoch": epoch, "next_batch": batch_index, "rng": rng_state()})
+        save_checkpoint(output / "last.pt", checkpoint_payload(epoch, batch_index))
+
+    def save_best_checkpoint(epoch, batch_index, val_loss):
+        nonlocal best_val_loss, best_step
+        best_val_loss = float(val_loss)
+        best_step = step
+        payload = checkpoint_payload(epoch, batch_index)
+        payload["is_best"] = True
+        save_checkpoint(output / "best.pt", payload)
+        write_json(output / "best_info.json", {
+            "step": best_step, "epoch": epoch, "loss": best_val_loss,
+            "batches": config.get("validation_batches", 20),
+            "metric": "val/loss", "path": str((output / "best.pt").resolve())})
+        if wandb_run is not None:
+            wandb_run.summary["best_val_loss"] = best_val_loss
+            wandb_run.summary["best_step"] = best_step
 
     if step >= max_steps:
         if wandb_run is not None:
@@ -196,13 +230,15 @@ def run_training(config, resume=None):
                                signatures=list(controls.signatures))
                 if progress is not None:
                     progress.update(1)
-                    progress.set_postfix(
-                        loss=f"{metrics['loss']:.4f}",
-                        h=f"{metrics.get('denoise_human', 0):.3f}",
-                        o=f"{metrics.get('denoise_object', 0):.3f}",
-                        epoch=epoch,
-                        refresh=False,
-                    )
+                    postfix = {
+                        "loss": f"{metrics['loss']:.4f}",
+                        "h": f"{metrics.get('denoise_human', 0):.3f}",
+                        "o": f"{metrics.get('denoise_object', 0):.3f}",
+                        "epoch": epoch,
+                    }
+                    if best_step is not None:
+                        postfix["best"] = f"{best_val_loss:.4f}"
+                    progress.set_postfix(**postfix, refresh=False)
                 if step % config.get("log_every", 20) == 0 or step == 1:
                     emit(json.dumps(metrics))
                     with (output / "train.jsonl").open("a", encoding="utf-8") as handle:
@@ -226,14 +262,24 @@ def run_training(config, resume=None):
                                                                config.get("geometry_weight", .05))
                             losses.append(result["loss"])
                     restore_rng(original_rng)
-                    val_payload = {"step": step, "loss": sum(losses) / len(losses),
-                                   "batches": len(losses)}
+                    val_loss = sum(losses) / len(losses)
+                    improved = save_best and val_loss < best_val_loss
+                    val_payload = {"step": step, "loss": val_loss, "batches": len(losses),
+                                   "best_val_loss": min(best_val_loss, val_loss) if save_best else None,
+                                   "improved": improved}
                     with (output / "validation.jsonl").open("a", encoding="utf-8") as handle:
                         handle.write(json.dumps(val_payload) + "\n")
                     emit(json.dumps({"validation": val_payload}))
-                    log_wandb(wandb_run, {"val/loss": val_payload["loss"],
-                                          "val/batches": val_payload["batches"],
-                                          "train/epoch": epoch}, step=step)
+                    wandb_payload = {"val/loss": val_payload["loss"],
+                                     "val/batches": val_payload["batches"],
+                                     "train/epoch": epoch}
+                    if val_payload["best_val_loss"] is not None:
+                        wandb_payload["val/best_loss"] = val_payload["best_val_loss"]
+                    log_wandb(wandb_run, wandb_payload, step=step)
+                    if improved:
+                        save_best_checkpoint(epoch, index + 1, val_loss)
+                        emit(json.dumps({"best_checkpoint": {"step": best_step, "loss": best_val_loss,
+                                                             "path": str(output / "best.pt")}}))
                 if step % config.get("save_every", 1000) == 0 or step == max_steps:
                     checkpoint(epoch, index + 1)
                 if step >= max_steps:

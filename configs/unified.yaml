@@ -20,6 +20,7 @@ log_every: 20
 save_every: 1000
 validate_every: 1000
 validation_batches: 20
+save_best: true
 progress: true
 use_wandb: false
 wandb_project: unified-hoi

@@ -388,53 +388,102 @@ python -m unified_hoi.sample \
 
 示例JSON中的帧号主要在0–7，只演示接口；正式实验应按自己的目标编辑，不能把它当作该序列的真实接触标注。`--projection-steps 30` 是采样后的几何修正，不是物理仿真。输出NPZ同时保存实际观测值/mask，旁边的 `.metrics.json` 保存诊断；文件名需使用小写 `.npz` 且不能已存在。
 
-文本训练的模型如需文本条件，采样还要传 `--text-features path/to/embedding.npy`（同一CLIP编码器的512维特征）；单独指定reference不会自动读取文本缓存。benchmark会从传入的带缓存清单中读取特征。
+文本训练的模型如需文本条件，采样还要传 `--text-features path/to/embedding.npy`（同一CLIP编码器的512维特征）；单独指定reference不会自动读取文本缓存。benchmark还需显式传 `--text-conditioned` 才会使用清单中的文本缓存。
 
 不需要目标动作也可以生成：`--scene scene.npz --frames 120 --controls ...`，scene包含物体点云、骨架偏移与fps。`examples/scene_controls.json` 使用明确坐标；`from_reference: true` 仅在确实有参考动作时使用。控制定义详见 [CONTROLS.md](docs/CONTROLS.md)。
 
 ## 8. 在测试集上做定量评估
 
-单条样例可检查保存的实际锚点：
+默认评估已改为 **Uni-HOI（arXiv:2604.27491v2）按任务使用的指标**：
 
-```bash
-python -m unified_hoi.evaluate \
-  --prediction runs/omomo_seed42/mixed.npz \
-  --reference data/processed/omomo_test/sequences/omomo_sub16_clothesstand_000.npz \
-  --output runs/omomo_seed42/mixed_eval.json
+| 任务 | 数据集 | 模式 | 主指标 |
+| --- | --- | --- | --- |
+| 物体动作 → 人体动作 | OMOMO / FullBodyManipulation | `101` | HandJPE、MPJPE（cm）、C_prec、C_rec、C_acc、c% |
+| 人体动作 → 物体动作 | BEHAVE | `011` | E_ch、E_v2v（m） |
+| 文本 → HOI | BEHAVE、OMOMO | `111` + 文本 | FID、R-Precision Top-1/2/3、Diversity |
+
+其中 HandJPE 使用世界坐标；MPJPE 使用各自骨盆对齐后的24关节。接触指标根据双手与原始物体网格顶点的5cm距离重新计算，不使用模型的22维接触输出，也不只检查已知锚点。c%按论文表格输出0–1比例。E_v2v使用对应的完整mesh顶点；E_ch使用每侧10000个独立表面采样点，计算双向非平方距离之和。论文正文写E_ch、表3写E_c，代码保留明确的E_ch名称，另附三维质心误差，避免混淆。
+
+几何指标已接通；FID等特征指标的计算代码已实现，但**Uni-HOI配套的预训练HOI/文本评估器尚未取得和验证**。不能用原始关节、模型隐藏层或仅CLIP文本特征替代。当前数据划分、10fps窗口、采样次数等也尚未与论文完整核齐，因此指标名称和公式对齐不等于论文表格数值可直接对比。详细定义、依赖和差异见 [EVALUATION.md](docs/EVALUATION.md)。
+
+Linux服务器评估时还需复制原始几何/评估资产（已转换的训练NPZ不用重做）：
+
+```text
+data/raw/behave/objects/
+OMOMO/data/captured_objects/
+OMOMO/data/test_diffusion_manip_seq_joints24.p
 ```
 
-完整评估用benchmark。先用两条窗口检查脚本，结果单独保存：
+这些路径可用 `--behave-objects`、`--omomo-objects`、`--omomo-raw` 覆盖。原始OMOMO文件用于取得真实24关节骨架偏移和逐帧物体尺度；只在评价阶段读取，不传给模型作新条件。
+
+先用少量窗口检查，再去掉 `--limit` 跑完整test，并换新输出目录：
 
 ```bash
 python scripts/benchmark.py \
   --checkpoint runs/omomo_seed42/last.pt \
   --manifest data/processed/omomo_combined.jsonl \
-  --window 120 --steps 50 --seed 42 --limit 2 \
-  --modes 011 101 mixed --projection-steps 0 \
+  --modes 101 --window 120 --steps 50 --seed 42 --limit 2 \
   --output runs/eval_omomo_seed42_check
 ```
 
-确认后去掉 `--limit`，在新目录跑完整test；不传 `--modes` 时默认评估七种完整方向与mixed：
+下面分别评估两个数据集。检查点路径替换成实际训练结果：
 
 ```bash
 python scripts/benchmark.py \
   --checkpoint runs/omomo_seed42/last.pt \
   --manifest data/processed/omomo_combined.jsonl \
-  --window 120 --steps 50 --seed 42 --projection-steps 0 \
-  --output runs/eval_omomo_seed42_raw
+  --modes 101 --window 120 --steps 50 --seed 42 \
+  --output runs/eval_omomo_seed42_raw --save-predictions
 
 python scripts/benchmark.py \
   --checkpoint runs/omomo_seed42/last.pt \
-  --manifest data/processed/omomo_combined.jsonl \
-  --window 120 --steps 50 --seed 42 --projection-steps 30 \
-  --output runs/eval_omomo_seed42_projected
+  --manifest data/processed/behave/manifest.jsonl \
+  --modes 011 --window 120 --steps 50 --seed 42 \
+  --output runs/eval_behave_seed42_raw --save-predictions
 ```
 
-保持相同检查点、数据、窗口、种子和采样步数，只改变修正步数。联合训练可用combined清单评估合并test，再分别传BEHAVE/OMOMO清单报告各数据集；程序不会自动给合并结果生成按数据集汇总。
+也可传 `data/processed/combined.jsonl`；不指定modes时，会自动对OMOMO跑101、对BEHAVE跑011，并按数据集/任务分组汇总。默认关闭文本条件，即使清单存在文本缓存也不会自动使用。对OMOMO复现“物体+文本→人体”设置时，需要文本训练的检查点、带缓存清单及 `--text-conditioned`。
 
-输出 `per_clip.jsonl` 和 `summary.json`：后者是有支持窗口的宏平均，并按实际观察签名分组。无接触锚点时，对应指标为null；不能按0处理。
+输出 `per_clip.jsonl` 和 `summary.json`。主指标位于summary的 `metrics`；按窗口宏平均和按帧加权均值分列，原有锚点、FK、滑移、地板及耗时诊断位于 `diagnostics_by_dataset_mode`。不要混用两种聚合方式。OMOMO原版代码支持best-of-20；本项目默认单样本，需要这一对照时传 `--samples-per-window 20 --modes 101`，以最小MPJPE选出同一个样本计算所有指标，并如实报告采样预算。Uni-HOI是否使用相同预算尚未确认。
 
-应一起检查接触距离、正/负接触共同满足、FK误差、滑移、条件保持和推理耗时。**硬锚点被程序写回，所以锚点误差为0仅证明接口保持条件；平滑度也不等于动作真实。** 当前未实现可信的HOI-FID、完整网格穿透或动力学执行成功率。详见 [EVALUATION.md](docs/EVALUATION.md)。
+对比几何修正时，保持检查点、数据、窗口、种子和采样步数一致，另跑 `--projection-steps 30` 并使用新目录。硬锚点误差为0只证明条件被保留；它不等于生成质量、接触正确或物理可执行。
+
+文本生成HOI需要单独进行数据集级评估：
+
+```bash
+python scripts/benchmark.py \
+  --checkpoint runs/omomo_text_seed42/last.pt \
+  --manifest data/processed/omomo_with_text.jsonl \
+  --modes 111 --text-conditioned --window 120 --steps 50 --seed 42 \
+  --output runs/eval_text_hoi
+```
+
+这会保存生成结果和 `feature_inputs.jsonl`，单条结果中的FID等保持null并注明缺少评估器。用与对照方法一致的已训练HOI/文本评估器提取配对特征后，可运行：
+
+```bash
+python -m unified_hoi.evaluate_features \
+  --features outputs/hoi_evaluator_features.npz \
+  --benchmark runs/eval_text_hoi \
+  --retrieval-batch-size 32 --diversity-pairs 300 --seed 42 \
+  --output runs/eval_text_hoi/feature_metrics.json
+```
+
+32/300仅为命令示例，论文没有明确这两个设置；应换成对照评估器的实际协议。NPZ特征格式及评估器来源记录要求见 [EVALUATION.md](docs/EVALUATION.md)。Diversity应接近真实数据的值，不是越大越好。
+
+我们自己的稀疏混合控制实验继续使用辅助诊断模式：
+
+```bash
+python scripts/benchmark.py \
+  --profile diagnostics --modes mixed human_object \
+  --checkpoint runs/omomo_seed42/last.pt \
+  --manifest data/processed/omomo_combined.jsonl \
+  --window 120 --steps 50 --seed 42 \
+  --output runs/eval_control_seed42
+```
+
+单条样例仍可运行 `python -m unified_hoi.evaluate --prediction ... --reference ... --output ...`。
+默认根据保存的完整条件mask识别论文任务，并额外输出 `paper_evaluation`；混合控制保留原有诊断。要只检查控制条件，传 `--profile diagnostics`。不把参考序列自动当成已知条件。
+
 
 ## 9. 做消融与未见条件组合实验
 
@@ -473,6 +522,7 @@ python -m unified_hoi.train \
 ```bash
 python scripts/benchmark.py \
   --checkpoint runs/ablations_omomo/relation_heldout_HO_seed42/last.pt \
+  --profile diagnostics \
   --manifest data/processed/omomo_combined.jsonl \
   --window 120 --steps 50 --seed 42 \
   --modes human_object --observed-signatures H+O \

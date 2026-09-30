@@ -150,6 +150,7 @@ def main():
                   fps=np.float32(batch["fps"][0].cpu()), timestamps=timestamps,
                   schema_version=np.int32(1), checkpoint_step=np.int64(checkpoint["step"]))
     arrays["fps_verified_by_metadata"] = np.bool_(batch["fps_verified_by_metadata"][0].cpu())
+    arrays["text_conditioned"] = np.bool_(batch["text_available"][0].cpu())
     arrays["contact_threshold"] = np.float32(batch["contact_threshold_m"])
     if bool(batch["floor_available"][0]):
         arrays["floor_y"] = np.float32(batch["floor_y_m"])

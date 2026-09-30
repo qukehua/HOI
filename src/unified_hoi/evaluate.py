@@ -1,4 +1,4 @@
-"""Kinematic evaluation of controlled HOI sequences; no physics certification."""
+"""Uni-HOI task metrics plus kinematic control diagnostics; no physics certification."""
 from __future__ import annotations
 
 import argparse
@@ -236,6 +236,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--controls", type=Path,
                         help="Optional override; default is the exact anchors/masks stored in the prediction")
     parser.add_argument("--reference-start", type=int, default=0)
+    parser.add_argument("--profile", choices=("uni-hoi", "diagnostics"), default="uni-hoi")
+    parser.add_argument("--task", choices=("auto", "object-to-human", "human-to-object", "text-to-hoi"), default="auto")
+    parser.add_argument("--metric-seed", type=int, default=42)
+    from .paper_metrics import add_asset_arguments, assets_from_args, evaluate_paper_sequence
+    add_asset_arguments(parser)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
     reference = load_record(args.reference)
@@ -300,6 +305,11 @@ def main(argv: list[str] | None = None) -> None:
         "contact_threshold_m": float(reference.get("contact_threshold", .05)),
     }
     report = evaluate_batch(states, controls, batch)
+    if args.profile == "uni-hoi":
+        report["paper_evaluation"] = evaluate_paper_sequence(
+            states, controls, reference, assets=assets_from_args(args), start=start, task=args.task,
+            text_conditioned=bool(np.asarray(prediction.get("text_conditioned", False)).item()),
+            chamfer_samples=args.chamfer_samples, seed=args.metric_seed)
     report["reference_start_frame"] = start
     report["control_source"] = control_source
     rendered = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False)

@@ -32,7 +32,17 @@ BEHAVE 全量转换随后在本机 CPU 完成：10fps、1024点、194 train / 17
 - Kimodo接口以官方签名与导出字段核对，并用测试替代模型验证桥接；**没有下载或运行预训练Kimodo权重**。
 - Kimodo桥接支持真实整数stride降采样、源时间戳、静态骨架反解和全源帧FK检查；HOI接入使用该人物自己的骨架尺寸。
 
-最终单元/集成测试 **132项通过**，静态检查通过。程序报告：`runs/final_smoke/samples/report.json`、`runs/smoke_verified/benchmark/summary.json`、`runs/smoke_verified/benchmark_heldout_pairs/summary.json`。最后一次完整测试结果保存在 `runs/verification/tests.xml`。
+原交付单元/集成测试132项通过，历史结果保存在 `runs/verification/tests.xml`。2026-09-30加入Uni-HOI评价指标后，全套测试 **155项通过**。原程序报告：`runs/final_smoke/samples/report.json`、`runs/smoke_verified/benchmark/summary.json`、`runs/smoke_verified/benchmark_heldout_pairs/summary.json`。
+
+## Uni-HOI评价指标更新（2026-09-30）
+
+- 默认benchmark按论文任务报告主指标：OMOMO物体→人体的HandJPE/MPJPE（cm）、接触精确率/召回率/准确率/接触帧比例；BEHAVE人体→物体的E_ch/E_v2v（m）。混合条件诊断保留。
+- OMOMO评价恢复原始24关节骨架，使用真实物体网格顶点与逐帧尺度；HandJPE为世界坐标，MPJPE减去各自骨盆。已与官方OMOMO函数对照验证数值。
+- 原始训练NPZ和模型结构没有改变。评价需额外读取已有原始OMOMO测试joblib及两数据集的物体mesh。
+- FID、R-Precision Top-1/2/3、Diversity的特征计算器、配对输出及来源检查已实现；没有取得/验证Uni-HOI配套的预训练HOI-文本评估器，尚不能产出可信的论文可比文本生成分数。缺失时明确输出null与原因。
+- 论文正文E_ch和表3的E_c命名不一致：使用正文明确的双向Chamfer定义，质心误差单独报告，不混为同一个指标。
+- 两数据集各一条真实测试窗口完成新benchmark生成→评价→保存流程，使用已有smoke检查点，不代表模型质量。报告：`runs/verification/uni_hoi_omomo_benchmark/summary.json`、`runs/verification/uni_hoi_behave_benchmark/summary.json`。真值/已知平移验证记录：`runs/verification/uni_hoi_metrics_real_data.json`。
+- 论文测试划分、fps、窗口、采样预算和特征评估器尚未全面对齐，所有报告保留 `directly_comparable_to_paper_table: false`。Linux/CUDA和正式模型实验仍待运行。
 
 硬锚点由程序写回，因此锚点误差为0只是程序正确性的检查。数步训练的样例仍存在接触距离和FK误差；没有把这些样例包装成已学会的交互。完整训练、多个种子消融、生成质量指标与物理执行成功率均尚未开展。
 

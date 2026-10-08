@@ -199,7 +199,7 @@ python -m unified_hoi.preprocess behave \
 
 ### 2.3 可选：启用文本条件
 
-**清单里有文字，不代表模型已经获得文本特征。** 当前完整清单没有CLIP特征缓存；不做这一步时，模型按无文本条件训练，仍可使用人体、物体、接触控制。
+**清单里有文字，不代表模型已经获得文本特征。** 原始 `omomo_combined.jsonl` 没有CLIP特征缓存；若不准备缓存，可将 `text_condition` 设为 `false`，使用原始清单训练无文本基线，仍可使用人体、物体、接触控制。
 
 若需要文本条件，必须在正式训练前缓存真实标注。下面以OMOMO为例；BEHAVE 则换成对应清单与输出文件名：
 
@@ -211,7 +211,29 @@ python scripts/cache_text.py \
   --device cpu
 ```
 
-首次运行可能下载CLIP文本编码器；默认输出512维特征，与模型的 `text_dim: 512` 对应。编码器冻结，缺失文本的序列继续使用零向量，不杜撰标注。后续训练和benchmark均应使用新的带缓存清单。该步骤在本次交付中尚未运行。
+首次运行可能下载CLIP文本编码器；默认输出512维特征，与模型的 `text_dim: 512` 对应。编码器冻结，相同描述共享缓存，缺失文本的序列继续使用零向量，不杜撰标注。输出清单已存在时脚本会拒绝覆盖；已有缓存可直接使用。迁移到服务器时，连同 `data/processed/text_features/` 一起复制，保持相对路径。
+
+本地已生成 `data/processed/omomo_with_text.jsonl`：4736条序列中4669条有有效的512维缓存，共享103个特征文件；其余67条没有文本。全部缓存通过维度、有限值和非零检查；真实小样本通过文本分支梯度检查及2步CPU训练与验证。报告见 `data/processed/omomo_text_verification.json`。这是数据接入与程序流程验证，不代表正式模型已学会文本控制。
+
+缓存完成后，文本和无文本实验共用 `configs/train_omomo.yaml`，只需修改其中的开关：
+
+```yaml
+manifest: data/processed/omomo_with_text.jsonl
+text_condition: true  # false 则关闭文本输入，仍可使用同一份清单
+text_dropout: 0.1
+```
+
+`text_condition` 同时控制训练与验证。关闭时不读取特征文件，返回零向量和 `text_available=False`；开启时读取真实缓存，没有描述的样本仍返回零向量。如果显式开启但train划分完全没有缓存路径，训练会报错，避免误跑成无文本实验。未设置此开关的旧配置保持原行为（有缓存则读取）。
+
+在已配置 CUDA 的训练环境中启动文本实验，使用独立输出目录：
+
+```bash
+python -m unified_hoi.train --config configs/train_omomo.yaml --output runs/omomo_text_seed42 --max-steps 1000
+```
+
+检查通过后，保留相同配置与 `--output runs/omomo_text_seed42`，使用 `--resume runs/omomo_text_seed42/last.pt --max-steps 100000` 继续本次文本实验。切换 `text_condition` 或更换 `manifest` 属于新实验，不能使用另一种设置的检查点严格续训；修改配置也不会让已在运行的训练自动切换文本输入。
+
+文本条件 benchmark 必须同时使用带缓存清单和 `--text-conditioned`，否则评测代码会清零文本特征。该模式要求每个被评测样本都有真实缓存；缺失描述的样本应在明确记录排除规则的评测子集中处理。单条采样则需通过 `--text-features` 显式传入对应的 `.npy`。
 
 ## 3. 先跑小规模流程检查
 
@@ -248,11 +270,12 @@ cp -n configs/unified.yaml configs/train_omomo.yaml
 cp -n configs/unified.yaml configs/train_behave.yaml
 ```
 
-分别编辑对应配置。OMOMO / BEHAVE 无文本基线的关键参数如下；保留复制文件中的其他字段。仓库已提供 `configs/train_omomo.yaml` 与 `configs/train_behave.yaml`，可直接检查后使用：
+分别编辑对应配置。仓库已提供 `configs/train_omomo.yaml` 与 `configs/train_behave.yaml`，可直接检查后使用；OMOMO 当前开启文本条件，做无文本基线时将同一配置的 `text_condition` 改为 `false`：
 
 | 参数 | 起始设置 | 含义与注意点 |
 | --- | --- | --- |
-| `manifest` | OMOMO：`data/processed/omomo_combined.jsonl`；BEHAVE：`data/processed/behave/manifest.jsonl` | 两个数据集分开训练，各自用自己的清单；有文本时用缓存清单 |
+| `manifest` | OMOMO：`data/processed/omomo_with_text.jsonl`；BEHAVE：`data/processed/behave/manifest.jsonl` | 两个数据集分开训练，各自用自己的清单；OMOMO 两种文本设置共用带缓存清单 |
+| `text_condition` | OMOMO：`true` | 是否在训练与验证中输入文本；改为 `false` 即运行无文本基线 |
 | `device` | `cuda:0` | 正式实验明确指定GPU；默认 `auto` 在没有CUDA时会退回CPU |
 | `seed` | `42` | 不同随机种子作为独立实验 |
 | `window / stride` | `120 / 60` | 10fps下最多12秒窗口、6秒步进；短片段用有效帧mask补齐 |
@@ -295,8 +318,7 @@ python -c "import torch; assert torch.cuda.is_available(), 'CUDA unavailable'"
 
 python -m unified_hoi.train \
   --config configs/train_omomo.yaml \
-  --manifest data/processed/omomo_combined.jsonl \
-  --output runs/omomo
+  --output runs/omomo_seed42 --max-steps 1000
 ```
 
 BEHAVE（与 OMOMO 分开训练，使用独立配置与输出目录）：
@@ -308,7 +330,7 @@ python -m unified_hoi.train \
   --output runs/behave
 ```
 
-有文本条件时，把上述 `--manifest` 换成对应的带缓存清单；续训也必须使用相同值。
+OMOMO 直接使用配置里的带缓存清单，通过 `text_condition` 开关选择文本输入。比较两种设置时分别指定输出目录；续训必须保持清单和开关不变。
 
 首次训练会先扫描train窗口并计算归一化统计，之后才开始打印优化损失；这阶段可能没有逐步日志。归一化不会使用val/test。训练中的随机mask自动覆盖多种条件，不需要给human→object、object→human分别启动不同模型。
 
@@ -340,7 +362,6 @@ cp -n runs/omomo_seed42/last.pt runs/omomo_seed42/step_001000.pt
 
 python -m unified_hoi.train \
   --config configs/train_omomo.yaml \
-  --manifest data/processed/omomo_combined.jsonl \
   --output runs/omomo_seed42 \
   --max-steps 100000 \
   --resume runs/omomo_seed42/last.pt
@@ -355,7 +376,7 @@ python -m unified_hoi.train \
 - `--max-steps` 指**累计总步数**，例如从1000续到100000，而不是额外训练100000步。
 - 必须保持模型结构、数据清单路径与内容、窗口、batch size、种子、学习率、损失、mask分布等不变。程序会拒绝关键配置不一致；不要用更改文件内容绕过检查。
 - 若第一次用了 `--manifest` 或 `--output`，续训也显式保留这些参数，防止读回默认路径。
-- 更换数据集、加入文本缓存或更改网络结构属于新实验；当前没有单独的“仅加载权重后微调”CLI。
+- 更换数据集、加入文本缓存、切换 `text_condition` 或更改网络结构属于新实验；当前没有单独的“仅加载权重后微调”CLI。
 - 在第一次保存之前中断，没有可恢复检查点。普通中断不会自动额外保存，最多丢失上次保存后的更新。
 - 已有 `last.pt` 的输出目录不能不带 `--resume` 再启动，以免覆盖已有训练。
 

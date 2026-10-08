@@ -165,7 +165,7 @@ rejected sequence IDs and reasons. Existing output manifests require explicit
 Relative paths are resolved against the manifest directory, not the working directory.
 To combine manifests, update relative paths or write absolute paths in a new manifest.
 
-`HOIDataset(manifest, split, window, stride, text_dim=512)` selects sequences by split
+`HOIDataset(manifest, split, window, stride, text_dim=512, text_condition=True)` selects sequences by split
 before taking any windows. It rejects a common source sequence assigned to multiple
 splits, mixed object-point counts, and mixed frame rates. All parts/overlapping
 windows from one source sequence must stay in one split. Fit normalization and text
@@ -175,6 +175,13 @@ Short final windows repeat the last pose and have `valid_frames=False` for paddi
 their padded timestamps also repeat. Use `valid_frames` to exclude padding from all
 losses and metrics. No motion is interpolated. The returned dictionary batches with
 PyTorch's default collator.
+
+Training passes the config's `text_condition` switch to both train and validation
+datasets. With `false`, cached embeddings are not opened and every sample returns
+zero text features and `text_available=False`; the same manifest can therefore
+serve both text-conditioned and no-text runs. Explicit `true` rejects a training
+split with no cache paths. Omitted switches retain the previous use-if-present
+behavior. Strict resume rejects changes to the switch.
 
 Text defaults to `""`. Supply verified annotations through `--text-file`, a JSON
 mapping from source sequence IDs to text. Optional manifest `text_features_path`

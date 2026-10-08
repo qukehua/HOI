@@ -1,4 +1,4 @@
-manifest: data/processed/omomo_combined.jsonl
+manifest: data/processed/omomo_with_text.jsonl
 output: runs/omomo_seed42
 seed: 42
 device: cuda:0
@@ -24,6 +24,8 @@ losses:
   fk: false
   floor: false
   slip: false
+# Toggle text input for both training and validation; false skips cached features.
+text_condition: true
 text_dropout: 0.1
 log_every: 20
 save_every: 1000

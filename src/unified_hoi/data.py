@@ -103,10 +103,11 @@ class HOIDataset(Dataset):
     All records in a loader must use the same object-point count and frame rate.
     """
 
-    def __init__(self, manifest, split, window, stride=None, text_dim=512):
+    def __init__(self, manifest, split, window, stride=None, text_dim=512, text_condition=True):
         if window <= 0 or (stride is not None and stride <= 0):
             raise ValueError("window and stride must be positive")
         self.window, self.stride, self.text_dim = int(window), int(stride or window), int(text_dim)
+        self.text_condition = text_condition
         self.records = [r for r in read_manifest(manifest) if r["split"] == split]
         self.windows = []
         point_counts, frame_rates = set(), set()
@@ -154,7 +155,7 @@ class HOIDataset(Dataset):
         output["timestamps"] = torch.from_numpy(np.pad(stamps, (0, self.window - length), mode="edge"))
         features = np.zeros(self.text_dim, dtype=np.float32)
         available = False
-        if entry.get("text_features_path"):
+        if self.text_condition and entry.get("text_features_path"):
             cached = np.load(entry["text_features_path"], allow_pickle=False)
             if cached.shape != (self.text_dim,) or not np.isfinite(cached).all():
                 raise ValueError(f"text embedding must be finite [{self.text_dim}]")

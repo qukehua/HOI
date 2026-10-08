@@ -114,6 +114,10 @@ def finish_swanlab(run):
 
 def run_training(config, resume=None):
     config = deepcopy(config)
+    # Omitted switches preserve the historical behavior: use caches when present.
+    text_condition = config.get("text_condition", True)
+    if not isinstance(text_condition, bool):
+        raise ValueError("text_condition must be a YAML boolean (true or false)")
     output = Path(config.get("output", "runs/unified"))
     if not resume and (output / "last.pt").exists():
         raise FileExistsError(f"Training checkpoint already exists in {output}; use --resume or a new --output")
@@ -123,11 +127,18 @@ def run_training(config, resume=None):
     torch.set_num_threads(config.get("cpu_threads", 4))
     device = device_for(config.get("device", "auto"))
     dataset = HOIDataset(config["manifest"], "train", config.get("window", 120),
-                         config.get("stride", 60), model_config.text_dim)
+                         config.get("stride", 60), model_config.text_dim,
+                         text_condition=text_condition)
     if not len(dataset):
         raise ValueError("No training windows; preprocess data and check train split first")
+    if config.get("text_condition") is True and not any(
+            entry.get("text_features_path") for entry in dataset.records):
+        raise ValueError("text_condition is enabled but the train split has no text_features_path; "
+                         "run scripts/cache_text.py and use its output manifest, "
+                         "or set text_condition: false")
     validation = HOIDataset(config["manifest"], "val", config.get("window", 120),
-                            config.get("window", 120), model_config.text_dim)
+                            config.get("window", 120), model_config.text_dim,
+                            text_condition=text_condition)
     model = UnifiedHOIDenoiser(model_config)
     if not resume:
         model.normalizer.fit(make_loader(dataset, config, 0, shuffle=False))
@@ -141,6 +152,8 @@ def run_training(config, resume=None):
     best_step = None
     if resume:
         saved = torch.load(resume, map_location="cpu", weights_only=False)
+        if saved["config"].get("text_condition", True) != text_condition:
+            raise ValueError("Resume configuration changed text_condition; start a new run instead")
         # Changing these changes the data order, loss or conditional task distribution.
         for key in ("model", "manifest", "window", "stride", "batch_size", "seed", "learning_rate",
                     "weight_decay", "balance_datasets", "holdout_signatures", "allowed_patterns",
@@ -171,6 +184,7 @@ def run_training(config, resume=None):
         "parameters": sum(p.numel() for p in model.parameters()), "device": str(device),
         "train_sequences": len(dataset.records), "train_windows": len(dataset),
         "validation_windows": len(validation), "torch": torch.__version__,
+        "text_condition": text_condition,
         "training_from_scratch": True, "physical_execution_validated": False,
         "save_best": save_best,
         "reference_repos": {"tridi": "afa9631dc2b3a250588ab64026eeaa37f18f0d38",

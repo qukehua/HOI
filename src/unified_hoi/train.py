@@ -50,41 +50,66 @@ def _scalar_metrics(metrics):
             if isinstance(value, (int, float)) and not isinstance(value, bool)}
 
 
-def init_wandb(config, output, run_info):
-    if not config.get("use_wandb", False):
+def init_swanlab(config, output, run_info):
+    if not config.get("use_swanlab", False):
         return None
     try:
-        import wandb
+        import swanlab
     except ImportError:
-        print("WandB is enabled but wandb is not installed. "
-              "Install it with `pip install wandb` or `pip install '.[wandb]'`.", flush=True)
+        print("SwanLab is enabled but swanlab is not installed. "
+              "Install it with `pip install swanlab` or `pip install '.[swanlab]'`.", flush=True)
         return None
 
-    run_name = config.get("wandb_run_name") or output.name
+    api_key = config.get("swanlab_api_key")
+    if api_key in (None, "", "null", "None"):
+        import os
+        api_key = os.environ.get("SWANLAB_API_KEY")
+    if api_key:
+        try:
+            swanlab.login(api_key=api_key, save=True)
+        except Exception as exc:
+            print(f"SwanLab login failed, continuing without SwanLab: {exc}", flush=True)
+            return None
+
+    run_name = config.get("swanlab_run_name") or output.name
+    logged_config = {key: value for key, value in config.items() if key != "swanlab_api_key"}
     kwargs = {
-        "project": config.get("wandb_project", "unified-hoi"),
-        "name": run_name,
-        "mode": config.get("wandb_mode", "online"),
-        "config": {**config, "run_info": run_info},
-        "dir": str(output),
+        "project": config.get("swanlab_project", "HOI"),
+        "experiment_name": run_name,
+        "mode": config.get("swanlab_mode", "online"),
+        "config": {**logged_config, "run_info": run_info},
+        "logdir": str(output / "swanlog"),
     }
-    entity = config.get("wandb_entity")
-    if entity not in (None, "", "null", "None"):
-        kwargs["entity"] = entity
-    if config.get("wandb_id"):
-        kwargs["id"] = config["wandb_id"]
-        kwargs["resume"] = config.get("wandb_resume", "allow")
+    workspace = config.get("swanlab_workspace")
+    if workspace not in (None, "", "null", "None"):
+        kwargs["workspace"] = workspace
+    if config.get("swanlab_id"):
+        kwargs["id"] = config["swanlab_id"]
+        kwargs["resume"] = config.get("swanlab_resume", "allow")
     try:
-        return wandb.init(**kwargs)
+        return swanlab.init(**kwargs)
     except Exception as exc:
-        print(f"WandB initialization failed, continuing without WandB: {exc}", flush=True)
+        print(f"SwanLab initialization failed, continuing without SwanLab: {exc}", flush=True)
         return None
 
 
-def log_wandb(run, payload, step):
+def log_swanlab(run, payload, step):
     if run is None:
         return
     run.log(payload, step=step)
+
+
+def finish_swanlab(run):
+    if run is None:
+        return
+    try:
+        run.finish()
+    except Exception:
+        try:
+            import swanlab
+            swanlab.finish()
+        except Exception:
+            pass
 
 
 def run_training(config, resume=None):
@@ -151,7 +176,7 @@ def run_training(config, resume=None):
                            "kimodo": "58e781898b3d7e328a676a75d3e338c45dce3ad9"}}
     write_json(output / "run_info.json", run_info)
     max_steps = config.get("max_steps", 100000)
-    wandb_run = init_wandb(config, output, run_info)
+    swanlab_run = init_swanlab(config, output, run_info)
     show_progress = config.get("progress", True) and tqdm is not None
     if config.get("progress", True) and tqdm is None:
         print("Progress bar requested but tqdm is not installed. "
@@ -181,13 +206,12 @@ def run_training(config, resume=None):
             "step": best_step, "epoch": epoch, "loss": best_val_loss,
             "batches": config.get("validation_batches", 20),
             "metric": "val/loss", "path": str((output / "best.pt").resolve())})
-        if wandb_run is not None:
-            wandb_run.summary["best_val_loss"] = best_val_loss
-            wandb_run.summary["best_step"] = best_step
+        if swanlab_run is not None:
+            log_swanlab(swanlab_run, {"val/best_loss": best_val_loss, "val/best_step": best_step},
+                        step=best_step)
 
     if step >= max_steps:
-        if wandb_run is not None:
-            wandb_run.finish()
+        finish_swanlab(swanlab_run)
         return str(Path(resume).resolve())
 
     progress = None
@@ -243,9 +267,9 @@ def run_training(config, resume=None):
                     emit(json.dumps(metrics))
                     with (output / "train.jsonl").open("a", encoding="utf-8") as handle:
                         handle.write(json.dumps(metrics) + "\n")
-                    log_wandb(wandb_run, {f"train/{key}": value
-                                          for key, value in _scalar_metrics(metrics).items()
-                                          if key not in {"step"}}, step=step)
+                    log_swanlab(swanlab_run, {f"train/{key}": value
+                                              for key, value in _scalar_metrics(metrics).items()
+                                              if key not in {"step"}}, step=step)
                 if len(validation) and step % config.get("validate_every", 1000) == 0:
                     original_rng = rng_state()
                     seed_everything(config.get("seed", 42) + 1000000)
@@ -270,12 +294,12 @@ def run_training(config, resume=None):
                     with (output / "validation.jsonl").open("a", encoding="utf-8") as handle:
                         handle.write(json.dumps(val_payload) + "\n")
                     emit(json.dumps({"validation": val_payload}))
-                    wandb_payload = {"val/loss": val_payload["loss"],
-                                     "val/batches": val_payload["batches"],
-                                     "train/epoch": epoch}
+                    swanlab_payload = {"val/loss": val_payload["loss"],
+                                       "val/batches": val_payload["batches"],
+                                       "train/epoch": epoch}
                     if val_payload["best_val_loss"] is not None:
-                        wandb_payload["val/best_loss"] = val_payload["best_val_loss"]
-                    log_wandb(wandb_run, wandb_payload, step=step)
+                        swanlab_payload["val/best_loss"] = val_payload["best_val_loss"]
+                    log_swanlab(swanlab_run, swanlab_payload, step=step)
                     if improved:
                         save_best_checkpoint(epoch, index + 1, val_loss)
                         emit(json.dumps({"best_checkpoint": {"step": best_step, "loss": best_val_loss,
@@ -289,8 +313,7 @@ def run_training(config, resume=None):
     finally:
         if progress is not None:
             progress.close()
-        if wandb_run is not None:
-            wandb_run.finish()
+        finish_swanlab(swanlab_run)
     return str((output / "last.pt").resolve())
 
 
@@ -301,31 +324,33 @@ def main():
     parser.add_argument("--output")
     parser.add_argument("--max-steps", type=int)
     parser.add_argument("--resume", help="Trusted checkpoint produced by this project")
-    parser.add_argument("--wandb", dest="use_wandb", action="store_true",
-                        help="Enable Weights & Biases logging")
-    parser.add_argument("--no-wandb", dest="use_wandb", action="store_false",
-                        help="Disable Weights & Biases logging")
-    parser.add_argument("--wandb-project")
-    parser.add_argument("--wandb-run-name")
-    parser.add_argument("--wandb-entity")
-    parser.add_argument("--wandb-mode", choices=("online", "offline", "disabled"))
+    parser.add_argument("--swanlab", dest="use_swanlab", action="store_true",
+                        help="Enable SwanLab logging")
+    parser.add_argument("--no-swanlab", dest="use_swanlab", action="store_false",
+                        help="Disable SwanLab logging")
+    parser.add_argument("--swanlab-project")
+    parser.add_argument("--swanlab-run-name")
+    parser.add_argument("--swanlab-workspace")
+    parser.add_argument("--swanlab-mode", choices=("online", "local", "offline", "disabled"))
     parser.add_argument("--progress", dest="progress", action="store_true",
                         help="Show a tqdm training progress bar")
     parser.add_argument("--no-progress", dest="progress", action="store_false",
                         help="Disable the tqdm training progress bar")
-    parser.set_defaults(use_wandb=None, progress=None)
+    parser.set_defaults(use_swanlab=None, progress=None)
     args = parser.parse_args()
     config = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
     for field in ("manifest", "output", "max_steps"):
         value = getattr(args, field)
         if value is not None:
             config[field] = value
-    if args.use_wandb is not None:
-        config["use_wandb"] = args.use_wandb
+    if args.use_swanlab is not None:
+        config["use_swanlab"] = args.use_swanlab
     if args.progress is not None:
         config["progress"] = args.progress
-    for field, key in (("wandb_project", "wandb_project"), ("wandb_run_name", "wandb_run_name"),
-                       ("wandb_entity", "wandb_entity"), ("wandb_mode", "wandb_mode")):
+    for field, key in (("swanlab_project", "swanlab_project"),
+                       ("swanlab_run_name", "swanlab_run_name"),
+                       ("swanlab_workspace", "swanlab_workspace"),
+                       ("swanlab_mode", "swanlab_mode")):
         value = getattr(args, field)
         if value is not None:
             config[key] = value

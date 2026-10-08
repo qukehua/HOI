@@ -13,7 +13,7 @@ dependencies = ["torch>=2.2", "numpy>=1.24", "scipy>=1.10", "PyYAML>=6", "trimes
 dev = ["pytest>=8", "ruff>=0.6"]
 body = ["smplx>=0.1.28"]
 text = ["transformers>=4.40", "safetensors>=0.4"]
-wandb = ["wandb>=0.17"]
+swanlab = ["swanlab>=0.6"]
 
 [project.scripts]
 hoi-train = "unified_hoi.train:main"

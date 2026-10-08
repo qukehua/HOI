@@ -8,17 +8,22 @@
 |---|---|---|
 | BEHAVE | 299条源序列已处理；293条完成真实 SMPL-H 转换，共147520帧、18种交互物体；6条因不在官方划分中而跳过；逐条数据校验通过 | 迁移到 Linux 后单独训练与验证 |
 | OMOMO | 已读取用户解压数据；全量转换并保留4736条序列、291801帧 | 源fps仍为30的显式假设，未由发布元数据确认；与 BEHAVE 分开训练 |
-| 官方文本 | 4912条序列级标注已提取；保留数据中4669条有匹配文本 | 可选CLIP缓存未下载/运行；本次训练使用无文本条件 |
+| OMOMO文本 | 保留数据中4669条有匹配文本，103个512维CLIP缓存已生成；原配置通过 `text_condition` 开关启用 | 其余67条无文本；未正式训练文本模型 |
+| BEHAVE文本 | HOI-Diff全部1613个文件、4835条描述已下载并校验；1454个动作片段、4357条有效描述已对齐，3805个512维CLIP缓存已生成 | 293条源序列划分保持不变；排除和时间裁切原因见 `behave/preparation_report.json` |
 
-完整 OMOMO 划分为 **3797 train / 422 val / 517 test**；先按源序列分组，再生成时间窗口。测试受试者sub16/17没有进入train/val。全量清单位于 `data/processed/omomo_combined.jsonl`，默认训练配置已指向它。
+完整 OMOMO 划分为 **3797 train / 422 val / 517 test**；先按源序列分组，再生成时间窗口。测试受试者sub16/17没有进入train/val。原始清单位于 `data/processed/omomo_combined.jsonl`，默认训练配置使用带缓存的 `data/processed/omomo_with_text.jsonl`。
 
 原始训练来源5280条中保留4219条，拒绝1061条；原始测试602条中保留517条，拒绝85条。拒绝范围包含mop/vacuum多部件物体及超出默认1%尺度波动阈值的序列。固定中位数尺度后的完整物体表面几何改变上界，保留序列中最大约 **8.442 mm**。详情和逐条原因见两个 `conversion_report.json`，这不是无损恢复全部原始标注。
 
-SMPL-H 不随本代码分发，下载资产仍被 Git 忽略。本地已取得官网兼容版 `smplx.zip`，原包在 `data/raw/smplh/`，男女 `.pkl` 模型在 `data/smplx_models/smplh/`。真实模型以 `num_betas=10, use_pca=False` 通过 CPU 加载及前向检查，网格形状均为 `[1,6890,3]`；下载检查见 `data/smplx_models/smplh_download_report.json`。
+SMPL-H 不随本代码分发，下载资产仍被 Git 忽略。男女 `.pkl` 模型保留在 `data/smplx_models/smplh/`，重复的 `smplx.zip` 已移出 `data` 归档，路径见 `docs/data_cleanup_report.json`。真实模型以 `num_betas=10, use_pca=False` 通过 CPU 加载及前向检查，网格形状均为 `[1,6890,3]`；下载检查见 `data/smplx_models/smplh_download_report.json`。
 
-BEHAVE 全量转换随后在本机 CPU 完成：10fps、1024点、194 train / 17 val / 82 test。所有293条输出与原始时间戳、物体位姿逐条核对，最大骨架重建误差约 `7.46e-7 m`；接触标签与5cm采样表面距离定义一致。5条序列没有正接触代理标签，未将其伪造为有接触。完整记录见 `data/processed/behave/conversion_report.json`、`verification_report.json` 和 `verification_per_sequence.jsonl`。清单位于 `data/processed/behave/manifest.jsonl`，与 OMOMO 分开训练/验证，不生成联合清单。
+历史全量转换在本机 CPU 完成：10fps、1024点、194 train / 17 val / 82 test，共293条源序列。当前 `data/processed/behave/` 保存的是从这些源序列裁出的1454个文本片段，原293条完整转换文件已不在该目录。原始参数、物体网格、模型和文本标注均保留，需完整源序列时可按README重建到 `data/processed/behave_source/`。当前训练入口为 `data/processed/behave_with_text.jsonl`，与 OMOMO 分开训练/验证。
 
 ## 已跑过的流程
+
+BEHAVE文本片段清单为 `data/processed/behave_with_text.jsonl`，896 train / 78 val / 480 test，分别继承194 / 17 / 82条源序列。仍使用 `configs/train_behave.yaml`，通过 `text_condition` 开关控制文本输入；训练随机选择同一片段的有效描述，验证和测试固定第一条。下载、对齐和缓存重建命令见README第2.3节。
+
+全部1454个动作文件与源时间戳切片逐项核对通过，3805个缓存均为有效非零512维向量。真实小样本完成2步CPU训练、2次验证和测试集文本条件采样；文本分支梯度非零，清零文本会改变损失。含多描述的训练跨epoch及epoch内断点续训均与连续训练逐项一致。报告：`data/processed/behave/verification_report.json`，测试采样：`runs/verification/behave_text_test_smoke/summary.json`；均非正式质量实验。
 
 - 真实 OMOMO 小样本转换：原train来源20条划为18 train / 2 val，另取官方test10条，三者没有混用。
 - CPU小模型（57,753参数）训练4步：损失/梯度有限，保存模型、EMA、优化器、归一化与RNG状态；不是正式收敛实验。

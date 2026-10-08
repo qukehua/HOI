@@ -1,0 +1,222 @@
+{
+  "scope": "remove verified duplicate downloads and obsolete mixed manifests from data; retain reconstruction and evaluation assets",
+  "method": "recoverable archive relocation",
+  "direct_deletion": "blocked by execution policy; no files permanently deleted",
+  "backup_directory": "D:\\code\\HOI\\tmp\\data_cleanup_20261008_180440",
+  "archived_files": [
+    {
+      "original": "D:\\code\\HOI\\data\\raw\\behave\\archives\\objects.zip",
+      "archive": "D:\\code\\HOI\\tmp\\data_cleanup_20261008_180440\\redundant_behave_archives\\objects.zip",
+      "bytes": 196462227,
+      "sha256": "940b29fcb58d117d977b3b9148c03719edede2b5f3c3fe0b4a493607d1b76471",
+      "verified_identical_extracted_files": 100
+    },
+    {
+      "original": "D:\\code\\HOI\\data\\raw\\smplh\\smplx.zip",
+      "archive": "D:\\code\\HOI\\tmp\\data_cleanup_20261008_180440\\redundant_smplh_archive\\smplx.zip",
+      "bytes": 79379726,
+      "sha256": "1b0182fdefcf80310df7971744b28754400574283fc5f8216ad22971f8394424",
+      "verified_identical_extracted_files": 2
+    },
+    {
+      "original": "D:\\code\\HOI\\data\\raw\\behave\\archives\\behave-30fps-params-v1.tar",
+      "archive": "D:\\code\\HOI\\tmp\\data_cleanup_20261008_180440\\redundant_behave_archives\\behave-30fps-params-v1.tar",
+      "bytes": 159016960,
+      "sha256": "5785f1b47263fca01330ac0ea8ea2e63a4e420883d6ccc6e305474efb6ddcb51",
+      "verified_identical_extracted_files": 898
+    },
+    {
+      "original": "D:\\code\\HOI\\data\\processed\\combined.jsonl",
+      "archive": "D:\\code\\HOI\\tmp\\data_cleanup_20261008_180440\\combined.jsonl",
+      "bytes": 3279082,
+      "sha256": "ede3e8cb5dfdbbb520c1c0e91512608f7fc5a1a0ab4d523cba932c7c25fbbbed",
+      "reason": "unused obsolete mixed-dataset manifest/report"
+    },
+    {
+      "original": "D:\\code\\HOI\\data\\processed\\combined_verification_report.json",
+      "archive": "D:\\code\\HOI\\tmp\\data_cleanup_20261008_180440\\combined_verification_report.json",
+      "bytes": 1589,
+      "sha256": "c065469d9b095c9d1b1cb91b8df5f1139f9c63ff5f7d1a35d3bb7926369c4f75",
+      "reason": "unused obsolete mixed-dataset manifest/report"
+    }
+  ],
+  "data_bytes_before": 1491802193,
+  "data_bytes_after": 1053656154,
+  "data_directory_reduction_bytes": 438146039,
+  "disk_space_reclaimed_bytes": 0,
+  "manifest_repair": {
+    "file": "data/processed/behave_with_text.jsonl",
+    "records": 1454,
+    "old_prefix": "behave_text/sequences/",
+    "new_prefix": "behave/sequences/",
+    "before_sha256": "4290d86898ef8a3c4ed83b257f8797c0b0e030c3728f01ff8d4a9102227864fb",
+    "after_sha256": "053b308aff2463008ba1b9c9b3be0305bb51086775192ecf340894bcc1f237f8"
+  },
+  "retained_assets": {
+    "raw_behave_sources": 299,
+    "raw_object_categories": 20,
+    "smplh_models": 2,
+    "verified_unchanged_raw_and_model_files": 1000,
+    "text_features": 3908,
+    "unused_text_features": 0
+  },
+  "config_reference_checks": [
+    {
+      "config": "configs/smoke.yaml",
+      "manifest": "data/processed/omomo_smoke_train/manifest.jsonl",
+      "records": 20,
+      "splits": {
+        "train": 18,
+        "val": 2
+      },
+      "missing_paths": 0
+    },
+    {
+      "config": "configs/train_behave.yaml",
+      "manifest": "data/processed/behave_with_text.jsonl",
+      "records": 1454,
+      "splits": {
+        "train": 896,
+        "val": 78,
+        "test": 480
+      },
+      "missing_paths": 0
+    },
+    {
+      "config": "configs/train_omomo.yaml",
+      "manifest": "data/processed/omomo_with_text.jsonl",
+      "records": 4736,
+      "splits": {
+        "train": 3797,
+        "val": 422,
+        "test": 517
+      },
+      "missing_paths": 0
+    },
+    {
+      "config": "configs/unified.yaml",
+      "manifest": "data/processed/omomo_combined.jsonl",
+      "records": 4736,
+      "splits": {
+        "train": 3797,
+        "val": 422,
+        "test": 517
+      },
+      "missing_paths": 0
+    },
+    {
+      "config": "configs/ablations/mask.yaml",
+      "manifest": "data/processed/omomo_combined.jsonl",
+      "records": 4736,
+      "splits": {
+        "train": 3797,
+        "val": 422,
+        "test": 517
+      },
+      "missing_paths": 0
+    },
+    {
+      "config": "configs/ablations/mask_coarse.yaml",
+      "manifest": "data/processed/omomo_combined.jsonl",
+      "records": 4736,
+      "splits": {
+        "train": 3797,
+        "val": 422,
+        "test": 517
+      },
+      "missing_paths": 0
+    },
+    {
+      "config": "configs/ablations/mask_coarse_heldout_HO.yaml",
+      "manifest": "data/processed/omomo_combined.jsonl",
+      "records": 4736,
+      "splits": {
+        "train": 3797,
+        "val": 422,
+        "test": 517
+      },
+      "missing_paths": 0
+    },
+    {
+      "config": "configs/ablations/mask_heldout_HO.yaml",
+      "manifest": "data/processed/omomo_combined.jsonl",
+      "records": 4736,
+      "splits": {
+        "train": 3797,
+        "val": 422,
+        "test": 517
+      },
+      "missing_paths": 0
+    },
+    {
+      "config": "configs/ablations/relation.yaml",
+      "manifest": "data/processed/omomo_combined.jsonl",
+      "records": 4736,
+      "splits": {
+        "train": 3797,
+        "val": 422,
+        "test": 517
+      },
+      "missing_paths": 0
+    },
+    {
+      "config": "configs/ablations/relation_heldout_HO.yaml",
+      "manifest": "data/processed/omomo_combined.jsonl",
+      "records": 4736,
+      "splits": {
+        "train": 3797,
+        "val": 422,
+        "test": 517
+      },
+      "missing_paths": 0
+    }
+  ],
+  "loader_checks": [
+    {
+      "config": "train_omomo.yaml",
+      "split": "train",
+      "records": 3797,
+      "windows": 5682,
+      "text_on_and_off_pass": true
+    },
+    {
+      "config": "train_omomo.yaml",
+      "split": "val",
+      "records": 422,
+      "windows": 427,
+      "text_on_and_off_pass": true
+    },
+    {
+      "config": "train_omomo.yaml",
+      "split": "test",
+      "records": 517,
+      "windows": 517,
+      "text_on_and_off_pass": true
+    },
+    {
+      "config": "train_behave.yaml",
+      "split": "train",
+      "records": 896,
+      "windows": 1745,
+      "text_on_and_off_pass": true
+    },
+    {
+      "config": "train_behave.yaml",
+      "split": "val",
+      "records": 78,
+      "windows": 98,
+      "text_on_and_off_pass": true
+    },
+    {
+      "config": "train_behave.yaml",
+      "split": "test",
+      "records": 480,
+      "windows": 564,
+      "text_on_and_off_pass": true
+    }
+  ],
+  "notes": [
+    "behave/ already contained the text clips at task start; the former full-source 293 NPZs were not removed by this cleanup.",
+    "omomo_combined.jsonl remains in use by unified/ablation configs; smoke data remains in use by smoke config/scripts."
+  ]
+}

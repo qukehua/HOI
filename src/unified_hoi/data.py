@@ -91,6 +91,11 @@ def read_manifest(path: str | Path) -> list[dict]:
             feature_path = Path(entry["text_features_path"])
             entry["text_features_path"] = str(feature_path if feature_path.is_absolute()
                                               else path.parent / feature_path)
+        for variant in entry.get("text_variants", []):
+            if variant.get("text_features_path"):
+                feature_path = Path(variant["text_features_path"])
+                variant["text_features_path"] = str(feature_path if feature_path.is_absolute()
+                                                    else path.parent / feature_path)
         records.append(entry)
     return records
 
@@ -108,6 +113,8 @@ class HOIDataset(Dataset):
             raise ValueError("window and stride must be positive")
         self.window, self.stride, self.text_dim = int(window), int(stride or window), int(text_dim)
         self.text_condition = text_condition
+        self.split = split
+        self.text_generator = None
         self.records = [r for r in read_manifest(manifest) if r["split"] == split]
         self.windows = []
         point_counts, frame_rates = set(), set()
@@ -155,18 +162,33 @@ class HOIDataset(Dataset):
         output["timestamps"] = torch.from_numpy(np.pad(stamps, (0, self.window - length), mode="edge"))
         features = np.zeros(self.text_dim, dtype=np.float32)
         available = False
-        if self.text_condition and entry.get("text_features_path"):
-            cached = np.load(entry["text_features_path"], allow_pickle=False)
+        selected_text = str(scalar(record["text"]))
+        feature_path = entry.get("text_features_path")
+        variants = entry.get("text_variants", [])
+        if self.text_condition and variants:
+            index = (int(torch.randint(len(variants), (), generator=self.text_generator).item())
+                     if self.split == "train" else 0)
+            selected = variants[index]
+            selected_text = selected["text"]
+            verified_texts = np.asarray(record.get("text_variants", [scalar(record["text"])]))
+            if selected_text not in verified_texts.tolist():
+                raise ValueError("manifest text variant is not present in the annotated archive")
+            feature_path = selected.get("text_features_path")
+            if not feature_path:
+                raise ValueError("text variants require cached features; run scripts/cache_text.py")
+        if self.text_condition and feature_path:
+            cached = np.load(feature_path, allow_pickle=False)
             if cached.shape != (self.text_dim,) or not np.isfinite(cached).all():
                 raise ValueError(f"text embedding must be finite [{self.text_dim}]")
             features = np.asarray(cached, dtype=np.float32)
-            available = bool(str(scalar(record["text"])).strip())
+            available = bool(selected_text.strip())
             if not available:
                 raise ValueError("text cache supplied for a record with no verified text")
         output["text_features"] = torch.from_numpy(features.copy())
         output["text_available"] = torch.tensor(available)
         for key in META_KEYS:
             output[key] = str(scalar(record[key]))
+        output["text"] = selected_text
         output["source_sequence_id"] = entry.get("source_sequence_id", output["sequence_id"])
         output["window_start"] = start
         return output

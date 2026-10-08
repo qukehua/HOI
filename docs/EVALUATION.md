@@ -178,7 +178,7 @@ python scripts/benchmark.py \
 
 python scripts/benchmark.py \
   --checkpoint runs/behave_seed42/last.pt \
-  --manifest data/processed/behave/manifest.jsonl \
+  --manifest data/processed/behave_with_text.jsonl \
   --modes 011 --output runs/eval_behave --save-predictions
 
 # Existing mixed-control experiments remain available.

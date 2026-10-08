@@ -25,8 +25,8 @@
 
 | 路径 | 当前状态 | 训练清单 |
 | --- | --- | --- |
-| OMOMO | 已转换完成，可直接使用；3797 train / 422 val / 517 test | `data/processed/omomo_combined.jsonl` |
-| BEHAVE | 已转换完成，可直接使用；194 train / 17 val / 82 test | `data/processed/behave/manifest.jsonl` |
+| OMOMO | 已转换完成，可直接使用；3797 train / 422 val / 517 test | `data/processed/omomo_with_text.jsonl` |
+| BEHAVE | 293条源序列；文本动作片段896 train / 78 val / 480 test | `data/processed/behave_with_text.jsonl`；动作位于 `data/processed/behave/sequences/` |
 
 **以下所有命令均在 Linux 训练服务器的 Bash 终端执行**，从服务器上的项目根目录运行。示例 `/path/to/HOI` 需替换成服务器实际路径，不是 Windows 的 `D:/code/HOI`。已有数据数量和 CPU 检查结果来自本机准备阶段；迁移后须重新检查，**尚未在服务器验证 CUDA 或完成正式训练**。
 
@@ -41,8 +41,8 @@
 | `data/processed/` | 复制清单、对应 `sequences/*.npz` 和已有文本特征；BEHAVE 与 OMOMO 清单均已准备 |
 | `data/processed/omomo_smoke_train/`、`data/processed/omomo_smoke_test/` | 第3步的小规模检查依赖这两份数据，也需复制 |
 | `OMOMO/data/` | 重做 OMOMO 转换时需要；已有完整转换结果时，训练本身不读取原始数据 |
-| `data/raw/behave/` | 使用 BEHAVE 时复制已下载和解压的数据，或按附录在服务器重新下载 |
-| `data/smplx_models/` | 复制已验证的 SMPL-H 男女模型及下载检查报告；原始压缩包另存于 `data/raw/smplh/smplx.zip` |
+| `data/raw/behave/` | 重建 BEHAVE 时需要原始参数；几何评测需要其中的 `objects/`，已有处理结果的训练无需读取原始参数 |
+| `data/smplx_models/` | 重建 BEHAVE 时复制已验证的 SMPL-H 男女模型及下载检查报告；重复压缩包已归档，见 `docs/data_cleanup_report.json` |
 | `data/annotations/` | 重做带文本的转换时复制已有标注映射，或按附录重新准备 |
 | `external/` | 可在服务器用 `python scripts/fetch_upstreams.py` 拉取固定版本 |
 | `runs/` | 仅需保留既有实验或续训时复制；新实验会自行创建输出目录 |
@@ -128,22 +128,22 @@ python -c "from collections import Counter; from pathlib import Path; from unifi
 
 ### 2.2 BEHAVE：已完成转换，可直接迁移结果
 
-**本地已完成 BEHAVE 全量转换**：299条源序列中293条成功，共147520帧；194 train / 17 val / 82 test。另6条因不在官方 `split.json` 中而跳过，具体名称见 `data/processed/behave/conversion_report.json`，没有其他转换错误。输出为10fps、1024个物体表面点，保留真实源时间戳。
+**本地当前使用 BEHAVE 文本动作片段**：由293条源序列裁出1454个片段，896 train / 78 val / 480 test，源序列划分为194 / 17 / 82。输出为10fps、1024个物体表面点，保留真实源时间戳。当前 `behave/` 保存这些文本片段；原来的293条完整转换结果已不在该目录，需要时从保留的原始参数重建到独立的 `behave_source/`。
 
-- BEHAVE 清单：`data/processed/behave/manifest.jsonl`；动作文件：`data/processed/behave/sequences/`。
-- 逐条校验：`data/processed/behave/verification_report.json`；所有输出通过格式、有限值、时间戳、骨架一致性、物体位姿及接触代理检查。
+- BEHAVE 训练/验证/测试清单：`data/processed/behave_with_text.jsonl`；动作文件：`data/processed/behave/sequences/`。
+- 对齐与校验：`data/processed/behave/preparation_report.json`、`verification_report.json`。目录内的 `manifest.jsonl` 是缓存前的中间清单，用于重新编码文本，不作为当前训练入口。
 
 检查 BEHAVE 清单与文件是否可用：
 
 ```bash
-python -c "from collections import Counter; from pathlib import Path; from unified_hoi.data import read_manifest; r=read_manifest('data/processed/behave/manifest.jsonl'); print(dict(Counter(x['split'] for x in r))); missing=[x['path'] for x in r if not Path(x['path']).is_file()]; print('missing:',len(missing)); assert not missing"
+python -c "from collections import Counter; from pathlib import Path; from unified_hoi.data import read_manifest; r=read_manifest('data/processed/behave_with_text.jsonl'); print(dict(Counter(x['split'] for x in r))); missing=[x['path'] for x in r if not Path(x['path']).is_file()]; print('missing:',len(missing)); assert not missing"
 ```
 
-当前应为 `train=194, val=17, test=82`，缺失文件数为0。
+当前应为 `train=896, val=78, test=480`，缺失文件数为0。数据清理时已修复旧 `behave_text/` 路径，当前实际目录名为 `behave/`。
 
 **复制已有转换结果到 Linux 后，可以跳过下面的模型准备与转换命令，直接按第4–5步分别配置 OMOMO 或 BEHAVE 训练。** 保留 `data/processed/behave/`、`omomo_train/`、`omomo_test/` 的相对目录结构。下面的步骤用于在新目录从原始数据重建，已有输出不应重复覆盖。
 
-已下载到 `data/raw/behave`：`objects.zip`、`behave-30fps-params-v1.tar`、`split.json`，已解压为299个序列和20个物体。**这些参数文件不包含 SMPL-H 身体模型**。
+`data/raw/behave` 保留已解压的299个序列、20个物体及 `split.json`。`objects.zip`、`behave-30fps-params-v1.tar` 经逐文件校验与解压结果一致后已移出 `data` 归档。**这些参数文件不包含 SMPL-H 身体模型**。
 
 **TriDi 已提供 SMPL-H 下载指引**：其 [docs/data.md 开头](https://github.com/ptrvilya/tridi/blob/main/docs/data.md#smpl-smplh-and-mano-model)链接到 [smplx 的模型下载说明](https://github.com/vchoutas/smplx#downloading-the-model)，再指向 [MANO / SMPL+H 官方下载入口](https://mano.is.tue.mpg.de/download.php)。该入口需要注册、登录并接受相应模型许可；未登录时会跳转到登录页。`pip install smplx` 只安装加载模型的代码，不会下载身体模型参数。
 
@@ -181,7 +181,7 @@ for gender in ("female", "male"):
 PY
 ```
 
-这是模型文件兼容性检查，不需要 GPU。**本地已下载并解压这两个模型，按转换器使用的 `num_betas=10, use_pca=False` 配置，均通过 CPU 加载和前向运算检查，输出有限的6890顶点人体网格。** 压缩包位于 `data/raw/smplh/smplx.zip`，文件 SHA256 和模型检查结果见 `data/smplx_models/smplh_download_report.json`；后续全量转换验证单独记录在上述 BEHAVE 报告中。Linux/CUDA 尚未实际验证。在缺少转换结果的新目录中执行：
+这是模型文件兼容性检查，不需要 GPU。**本地已下载并解压这两个模型，按转换器使用的 `num_betas=10, use_pca=False` 配置，均通过 CPU 加载和前向运算检查，输出有限的6890顶点人体网格。** 重复的 `smplx.zip` 已移出 `data` 归档；模型保留在 `data/smplx_models/smplh/`。文件 SHA256 和模型检查结果见 `data/smplx_models/smplh_download_report.json`。Linux/CUDA 尚未实际验证。在缺少完整源序列转换结果时执行：
 
 ```bash
 python -m unified_hoi.preprocess behave \
@@ -190,10 +190,10 @@ python -m unified_hoi.preprocess behave \
   --split-file data/raw/behave/split.json \
   --val-from-train 0.1 --split-seed 0 \
   --target-fps 10 --points 1024 \
-  --output data/processed/behave
+  --output data/processed/behave_source
 ```
 
-检查 `data/processed/behave/conversion_report.json` 的写入数量与拒绝原因；不要仅看到生成目录就认为转换成功。BEHAVE 与 OMOMO 各自使用独立清单训练，不要再合并成联合清单。BEHAVE使用官方train/test划分，并只从train划出val。其30fps测试序列协议不等于TriDi原文的静态1fps测试设置，不能直接把本项目结果与其原表格作数值比较。
+重建后检查 `data/processed/behave_source/conversion_report.json` 的写入数量与拒绝原因，再按第2.3节裁切和缓存文本。BEHAVE 与 OMOMO 各自使用独立清单训练，不要再合并成联合清单。BEHAVE使用官方train/test划分，并只从train划出val。其30fps测试序列协议不等于TriDi原文的静态1fps测试设置，不能直接把本项目结果与其原表格作数值比较。
 
 更换数据集（例如从 OMOMO 换成 BEHAVE）会改变数据清单与归一化；当前严格续训入口不支持这样更换数据。应新建实验从头训练。
 
@@ -235,6 +235,45 @@ python -m unified_hoi.train --config configs/train_omomo.yaml --output runs/omom
 
 文本条件 benchmark 必须同时使用带缓存清单和 `--text-conditioned`，否则评测代码会清零文本特征。该模式要求每个被评测样本都有真实缓存；缺失描述的样本应在明确记录排除规则的评测子集中处理。单条采样则需通过 `--text-features` 显式传入对应的 `.npy`。
 
+BEHAVE 使用同一个开关，直接编辑 `configs/train_behave.yaml`，无需另建配置：
+
+```yaml
+manifest: data/processed/behave_with_text.jsonl
+text_condition: true  # false 则在相同片段上关闭文本输入
+text_dropout: 0.1
+```
+
+本地已下载 [HOI-Diff 官方文本](https://github.com/neu-vi/HOI-Diff/tree/a9c5c2d091b5b88ffacbfadbef3537876dbbc49b/dataset/behave_t2m/texts) 全部1613个文件、4835条描述，固定版本 `a9c5c2d091b5b88ffacbfadbef3537876dbbc49b`，逐文件通过 Git blob 校验。原始标注、动作时间标签、上游划分和许可保存在 `data/annotations/hoi_diff/<commit>/`，完整性记录见其中的 `download_report.json`。
+
+按动作区间和原始时间戳对齐后，得到1454个可用片段、4357条有效描述：
+
+| 划分 | 原始源序列 | 有文本动作片段 | 有效描述 |
+| --- | ---: | ---: | ---: |
+| train | 194 | 896 | 2686 |
+| val | 17 | 78 | 232 |
+| test | 82 | 480 | 1439 |
+
+所有293条源序列均有可用片段，每个片段继承本地源序列划分，不重新采用上游的片段划分。描述只配给对应时间范围，当前片段保存在 `behave/sequences/`。4357条有效描述共用3805个512维CLIP缓存，全部通过维度、有限值和非零检查。数据加载器在训练时均匀随机选择该片段的一条描述及其缓存；验证和测试固定使用第一条有效描述，避免随机文本影响比较。全部描述保存在 `text_variants` 中。关闭 `text_condition` 不读取任何文本缓存。
+
+标注下载完整不等于本地动作全时段都有文本。130个标注文件对应本地清单之外的源序列；另有28个动作区间没有本地原始帧，1个描述区间与实际片段无交集，均未编造动作补齐。1条 `0.0S` 时间字段错误的描述被排除，其余同片段描述仍可用。22个时间范围末端超出可用片段，取实际交集；216个片段不足1秒，使用现有有效帧mask补齐。全部原因和覆盖率见 `data/processed/behave/preparation_report.json`。这是本项目10fps文本数据协议，不是对HOI-Diff原论文划分及评测流程的复现。
+
+从原始数据重建时依次执行（已有输出可直接使用，脚本拒绝覆盖已生成清单）：
+
+```bash
+python scripts/download_behave_text.py
+python scripts/prepare_behave_text.py --manifest data/processed/behave_source/manifest.jsonl --output data/processed/behave
+python scripts/cache_text.py --manifest data/processed/behave/manifest.jsonl --output data/processed/behave_with_text.jsonl --device cpu
+```
+
+迁移训练数据时一起复制 `data/processed/behave_with_text.jsonl`、`data/processed/behave/`、`data/processed/text_features/`，保留相对路径。train/val/test 共用带缓存清单，通过 `split` 选取各自记录。比较文本与无文本条件时使用同一清单，仅切换开关；若要进行完整源序列实验，先重建独立的 `behave_source/`。
+
+```bash
+python -m unified_hoi.train --config configs/train_behave.yaml --output runs/behave_text_seed42 --max-steps 1000
+python scripts/benchmark.py --checkpoint runs/behave_text_seed42/last.pt --manifest data/processed/behave_with_text.jsonl --text-conditioned --modes 111 --output runs/eval_behave_text_seed42 --save-predictions
+```
+
+训练命令会读取train并周期性验证val；benchmark只读取test。全部片段已逐项核对与源数据切片一致，文本分支梯度非零，真实小样本通过2步CPU训练、2次验证和测试集文本条件采样。模型训练完成前，流程检查结果不能代表文本生成质量。完整验证报告见 `data/processed/behave/verification_report.json`。
+
 ## 3. 先跑小规模流程检查
 
 在服务器已激活的 Python 环境中运行以下检查。`configs/smoke.yaml` 明确使用 CPU，只检查真实 OMOMO 小样本的程序流程；先确认第1步已准备官方源码以及两份 smoke 数据。
@@ -270,12 +309,12 @@ cp -n configs/unified.yaml configs/train_omomo.yaml
 cp -n configs/unified.yaml configs/train_behave.yaml
 ```
 
-分别编辑对应配置。仓库已提供 `configs/train_omomo.yaml` 与 `configs/train_behave.yaml`，可直接检查后使用；OMOMO 当前开启文本条件，做无文本基线时将同一配置的 `text_condition` 改为 `false`：
+分别编辑对应配置。仓库已提供 `configs/train_omomo.yaml` 与 `configs/train_behave.yaml`，两者均使用 `text_condition` 开关，并已接入文本缓存。做无文本基线时将同一配置的开关改为 `false`：
 
 | 参数 | 起始设置 | 含义与注意点 |
 | --- | --- | --- |
-| `manifest` | OMOMO：`data/processed/omomo_with_text.jsonl`；BEHAVE：`data/processed/behave/manifest.jsonl` | 两个数据集分开训练，各自用自己的清单；OMOMO 两种文本设置共用带缓存清单 |
-| `text_condition` | OMOMO：`true` | 是否在训练与验证中输入文本；改为 `false` 即运行无文本基线 |
+| `manifest` | OMOMO：`data/processed/omomo_with_text.jsonl`；BEHAVE：`data/processed/behave_with_text.jsonl` | 两个数据集分开训练，各自用自己的清单；两种文本设置共用同一数据集的带缓存清单 |
+| `text_condition` | 两者均为 `true` | 是否在训练与验证中输入文本；关闭则运行相同片段上的无文本基线 |
 | `device` | `cuda:0` | 正式实验明确指定GPU；默认 `auto` 在没有CUDA时会退回CPU |
 | `seed` | `42` | 不同随机种子作为独立实验 |
 | `window / stride` | `120 / 60` | 10fps下最多12秒窗口、6秒步进；短片段用有效帧mask补齐 |
@@ -326,11 +365,10 @@ BEHAVE（与 OMOMO 分开训练，使用独立配置与输出目录）：
 ```bash
 python -m unified_hoi.train \
   --config configs/train_behave.yaml \
-  --manifest data/processed/behave/manifest.jsonl \
-  --output runs/behave
+  --output runs/behave_text_seed42 --max-steps 1000
 ```
 
-OMOMO 直接使用配置里的带缓存清单，通过 `text_condition` 开关选择文本输入。比较两种设置时分别指定输出目录；续训必须保持清单和开关不变。
+OMOMO 和 BEHAVE 直接使用各自配置里的带缓存清单，通过 `text_condition` 开关选择文本输入。比较两种设置时分别指定输出目录；续训必须保持清单和开关不变。
 
 首次训练会先扫描train窗口并计算归一化统计，之后才开始打印优化损失；这阶段可能没有逐步日志。归一化不会使用val/test。训练中的随机mask自动覆盖多种条件，不需要给human→object、object→human分别启动不同模型。
 
@@ -355,7 +393,7 @@ tail -n 5 runs/omomo_seed42/validation.jsonl
 cat runs/behave_seed42/run_info.json
 ```
 
-1000步完成后，先保留这个检查点，再继续到总计100000步。以 OMOMO 为例（BEHAVE 把配置、清单与输出目录换成 `train_behave.yaml` / `behave/manifest.jsonl` / `runs/behave_seed42`）：
+1000步完成后，先保留这个检查点，再继续到总计100000步。以 OMOMO 为例（BEHAVE 把配置、清单与输出目录换成 `train_behave.yaml` / `behave_with_text.jsonl` / `runs/behave_text_seed42`）：
 
 ```bash
 cp -n runs/omomo_seed42/last.pt runs/omomo_seed42/step_001000.pt
@@ -458,7 +496,7 @@ python scripts/benchmark.py \
 
 python scripts/benchmark.py \
   --checkpoint runs/behave_seed42/last.pt \
-  --manifest data/processed/behave/manifest.jsonl \
+  --manifest data/processed/behave_with_text.jsonl \
   --modes 011 --window 120 --steps 50 --seed 42 \
   --output runs/eval_behave_seed42_raw --save-predictions
 ```

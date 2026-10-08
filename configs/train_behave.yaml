@@ -1,4 +1,4 @@
-manifest: data/processed/behave/manifest.jsonl
+manifest: data/processed/behave_with_text.jsonl
 output: runs/behave_seed42
 seed: 42
 device: cuda:0
@@ -24,6 +24,9 @@ losses:
   fk: false
   floor: false
   slip: false
+# Toggle text input for both training and validation.
+# Both settings use the same temporally aligned HOI-Diff clips and split assignments.
+text_condition: true
 text_dropout: 0.1
 log_every: 20
 save_every: 1000

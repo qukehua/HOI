@@ -215,8 +215,9 @@ The complete release does contain both, unlike these early smoke subsets.
 The downloaded BEHAVE release contains 299 sequence directories. Three inspected
 human parameter archives have `[T,156]` poses, constant `[T,10]` betas, and actual
 `frame_times` at approximately 30 fps. SMPL-H assets are a separate download.
-The official ready-to-load `smplx.zip` has now been downloaded locally to
-`data/raw/smplh/`, with male/female models extracted to `data/smplx_models/smplh/`.
+The official ready-to-load male/female models are retained in `data/smplx_models/smplh/`.
+The redundant `smplx.zip` was verified against both extracted files and archived
+outside `data/`; see `docs/data_cleanup_report.json` for its recoverable location.
 Both pass CPU loading and a forward pass with `num_betas=10, use_pca=False`;
 see `data/smplx_models/smplh_download_report.json` for hashes and checks.
 Full BEHAVE conversion has now completed on the local CPU: 293 sequences,
@@ -227,12 +228,16 @@ from the official mapping and are explicitly rejected; there are no other
 conversion errors. All 293 outputs were checked against original timestamps and
 object transforms. Maximum FK error is approximately 7.46e-7 metres. Five records
 have no positive joint-to-surface contact proxy labels; no contacts were invented.
-See `data/processed/behave/conversion_report.json`, `verification_report.json`,
-and `verification_per_sequence.jsonl`.
+These are historical full-source conversion results. The current
+`data/processed/behave/sequences/` contains 1,454 text-aligned clips, with reports
+in `data/processed/behave/preparation_report.json` and `verification_report.json`.
+Full source archives can be rebuilt into a separate `data/processed/behave_source/`
+using the retained raw parameters, object meshes, and SMPL-H models.
 
 BEHAVE and OMOMO are trained and validated separately. Use
-`data/processed/behave/manifest.jsonl` for BEHAVE-only runs and
-`data/processed/omomo_combined.jsonl` for OMOMO-only runs. Do not merge them into
+`data/processed/behave_with_text.jsonl` for BEHAVE-only runs and
+`data/processed/omomo_with_text.jsonl` for OMOMO-only runs. These manifests support
+both settings of `text_condition`. Do not merge them into
 a joint training manifest. Linux/CUDA validation and formal training remain
 pending; the OMOMO source-fps assumption still applies even though both datasets
 are stored at 10 fps.

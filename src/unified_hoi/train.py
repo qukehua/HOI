@@ -26,6 +26,11 @@ except ImportError:  # pragma: no cover - optional until installed
 
 def make_loader(dataset, config, epoch, shuffle=True):
     generator = torch.Generator().manual_seed(config.get("seed", 42) + epoch)
+    # Replay caption draws from the start of an epoch when skipping resumed batches,
+    # without consuming the model RNG restored from the checkpoint. Worker processes
+    # receive their own reproducible torch RNG seed from DataLoader instead.
+    dataset.text_generator = (torch.Generator().manual_seed(config.get("seed", 42) + epoch)
+                              if config.get("workers", 0) == 0 else None)
     sampler = None
     if shuffle and config.get("balance_datasets", True):
         labels = [dataset.records[i]["dataset"] for i, _, _ in dataset.windows]

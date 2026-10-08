@@ -144,7 +144,8 @@ def run_training(config, resume=None):
         # Changing these changes the data order, loss or conditional task distribution.
         for key in ("model", "manifest", "window", "stride", "batch_size", "seed", "learning_rate",
                     "weight_decay", "balance_datasets", "holdout_signatures", "allowed_patterns",
-                    "diffusion_steps", "geometry_weight", "text_dropout", "ema_decay", "gradient_clip"):
+                    "diffusion_steps", "geometry_weight", "losses", "text_dropout", "ema_decay",
+                    "gradient_clip"):
             if saved["config"].get(key) != config.get(key):
                 raise ValueError(f"Resume configuration changed {key}; start a new run instead")
         model.load_state_dict(saved["model"])
@@ -239,8 +240,10 @@ def run_training(config, resume=None):
                 keep_text = torch.rand(len(batch["human"]), 1, device=device) >= config.get("text_dropout", .1)
                 batch["text_features"] = batch["text_features"] * keep_text
                 optimizer.zero_grad(set_to_none=True)
-                loss, metrics = diffusion.training_loss(model, batch, controls,
-                                                       geometry_weight=config.get("geometry_weight", .05))
+                loss, metrics = diffusion.training_loss(
+                    model, batch, controls,
+                    geometry_weight=config.get("geometry_weight", .05),
+                    loss_flags=config.get("losses"))
                 if not torch.isfinite(loss):
                     raise FloatingPointError(f"Non-finite loss at step {step}; checkpoint remains last finite step")
                 loss.backward()
@@ -282,8 +285,10 @@ def run_training(config, resume=None):
                             control = sample_controls(val, val["valid_frames"],
                                                       holdout_signatures=config.get("holdout_signatures", ()),
                                                       allowed_patterns=config.get("allowed_patterns"))
-                            _, result = diffusion.training_loss(ema, val, control,
-                                                               config.get("geometry_weight", .05))
+                            _, result = diffusion.training_loss(
+                                ema, val, control,
+                                geometry_weight=config.get("geometry_weight", .05),
+                                loss_flags=config.get("losses"))
                             losses.append(result["loss"])
                     restore_rng(original_rng)
                     val_loss = sum(losses) / len(losses)

@@ -9,6 +9,30 @@ from .geometry import matrix_to_rotation6d, rotation6d_to_matrix
 from .normalization import MODALITIES
 from .objectives import geometric_losses, reconstruction_loss
 
+# Per-term training switches. Geometric terms default off; enable via config.losses.
+DEFAULT_LOSS_FLAGS = {
+    "denoise_human": True,
+    "denoise_object": True,
+    "denoise_contact": True,
+    "contact": False,
+    "noncontact": False,
+    "fk": False,
+    "floor": False,
+    "slip": False,
+}
+GEOMETRY_LOSS_KEYS = ("contact", "noncontact", "fk", "floor", "slip")
+GEOMETRY_RELATIVE_WEIGHTS = {"contact": 1., "noncontact": 1., "fk": 1., "floor": .1, "slip": .01}
+
+
+def resolve_loss_flags(overrides=None):
+    flags = dict(DEFAULT_LOSS_FLAGS)
+    if overrides:
+        unknown = set(overrides) - set(DEFAULT_LOSS_FLAGS)
+        if unknown:
+            raise ValueError(f"Unknown loss switches: {sorted(unknown)}")
+        flags.update({key: bool(value) for key, value in overrides.items()})
+    return flags
+
 
 @dataclass
 class NormalizedControls:
@@ -40,7 +64,8 @@ class HOIDiffusion:
     def coefficients(self, times, tensor):
         return self.alpha.to(tensor.device)[times].reshape(-1, *([1] * (tensor.ndim - 1)))
 
-    def training_loss(self, model, batch, controls, geometry_weight=.05, generator=None):
+    def training_loss(self, model, batch, controls, geometry_weight=.05, loss_flags=None, generator=None):
+        flags = resolve_loss_flags(loss_flags)
         clean = model.normalizer.encode(batch)
         cond = normalized_controls(controls, model.normalizer)
         b = clean["object"].shape[0]
@@ -55,14 +80,18 @@ class HOIDiffusion:
             noisy[key] = a.sqrt() * clean[key] + (1 - a).sqrt() * noise
         prediction = model(noisy, ts, cond, batch)
         rec = reconstruction_loss(prediction, clean, controls.masks, controls.valid_frames)
-        total = sum(rec.values())
         metrics = {"denoise_" + k: v for k, v in rec.items()}
-        if geometry_weight:
+        terms = [rec[key] for key in MODALITIES if flags["denoise_" + key]]
+        geo_enabled = bool(geometry_weight) and any(flags[key] for key in GEOMETRY_LOSS_KEYS)
+        if geo_enabled:
             physical = model.normalizer.decode(cond.apply(prediction))
             geo = geometric_losses(physical, batch, batch["contact"])
-            total = total + geometry_weight * (geo["contact"] + geo["noncontact"] + geo["fk"]
-                                                + .1 * geo["floor"] + .01 * geo["slip"])
             metrics.update(geo)
+            terms.append(geometry_weight * sum(
+                GEOMETRY_RELATIVE_WEIGHTS[key] * geo[key] for key in GEOMETRY_LOSS_KEYS if flags[key]))
+        if not terms:
+            raise ValueError("At least one loss switch in config.losses must be enabled")
+        total = sum(terms)
         metrics["loss"] = total
         return total, {k: float(v.detach()) for k, v in metrics.items()}
 

@@ -15,6 +15,15 @@ gradient_clip: 1.0
 ema_decay: 0.999
 diffusion_steps: 1000
 geometry_weight: 0.05
+losses:
+  denoise_human: true
+  denoise_object: true
+  denoise_contact: true
+  contact: false
+  noncontact: false
+  fk: false
+  floor: false
+  slip: false
 text_dropout: 0.1
 log_every: 20
 save_every: 1000

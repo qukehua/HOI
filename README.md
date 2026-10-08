@@ -296,7 +296,7 @@ python -c "import torch; assert torch.cuda.is_available(), 'CUDA unavailable'"
 python -m unified_hoi.train \
   --config configs/train_omomo.yaml \
   --manifest data/processed/omomo_combined.jsonl \
-  --output runs/omomo_seed42
+  --output runs/omomo
 ```
 
 BEHAVE（与 OMOMO 分开训练，使用独立配置与输出目录）：
@@ -305,7 +305,7 @@ BEHAVE（与 OMOMO 分开训练，使用独立配置与输出目录）：
 python -m unified_hoi.train \
   --config configs/train_behave.yaml \
   --manifest data/processed/behave/manifest.jsonl \
-  --output runs/behave_seed42
+  --output runs/behave
 ```
 
 有文本条件时，把上述 `--manifest` 换成对应的带缓存清单；续训也必须使用相同值。

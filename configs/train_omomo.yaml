@@ -8,7 +8,7 @@ window: 120
 stride: 60
 batch_size: 8
 balance_datasets: true
-max_steps: 100000
+max_steps: 500000
 learning_rate: 0.0001
 weight_decay: 0.01
 gradient_clip: 1.0

@@ -228,7 +228,7 @@ text_dropout: 0.1
 在已配置 CUDA 的训练环境中启动文本实验，使用独立输出目录：
 
 ```bash
-python -m unified_hoi.train --config configs/train_omomo.yaml --output runs/omomo_text_seed42 --max-steps 1000
+python -m unified_hoi.train --config configs/train_omomo.yaml --output runs/omomo_text_seed42 
 ```
 
 检查通过后，保留相同配置与 `--output runs/omomo_text_seed42`，使用 `--resume runs/omomo_text_seed42/last.pt --max-steps 100000` 继续本次文本实验。切换 `text_condition` 或更换 `manifest` 属于新实验，不能使用另一种设置的检查点严格续训；修改配置也不会让已在运行的训练自动切换文本输入。

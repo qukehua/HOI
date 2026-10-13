@@ -1,5 +1,5 @@
 manifest: data/processed/behave_with_text.jsonl
-output: runs/behave_seed42
+output: runs/behave_10.13
 seed: 42
 device: cuda:0
 cpu_threads: 4
@@ -8,7 +8,7 @@ window: 120
 stride: 60
 batch_size: 8
 balance_datasets: true
-max_steps: 100000
+max_steps: 500000
 learning_rate: 0.0001
 weight_decay: 0.01
 gradient_clip: 1.0
@@ -40,6 +40,9 @@ swanlab_run_name: null
 swanlab_workspace: null
 swanlab_mode: online
 holdout_signatures: []
+# Optional TriDi-style mode whitelist (H/O/C, 1=generate, 0=condition).
+# Omit to train on all seven full modes plus sparse patterns.
+# allowed_patterns: ["011", "101", "111"]
 model:
   width: 192
   heads: 6

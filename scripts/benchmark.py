@@ -9,7 +9,8 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from unified_hoi.controls import GENERATED_MODES, PARTIAL_PATTERNS, sample_controls
+from unified_hoi.controls import (GENERATED_MODES, describe_mode, mode_to_target_name, parse_mode,
+                                  sample_controls)
 from unified_hoi.data import HOIDataset, load_record
 from unified_hoi.evaluate import evaluate_batch
 from unified_hoi.paper_metrics import MODE_TASKS, add_asset_arguments, assets_from_args, evaluate_paper_sequence
@@ -35,8 +36,10 @@ def main(argv=None):
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--profile", choices=("uni-hoi", "diagnostics"), default="uni-hoi")
-    parser.add_argument("--modes", nargs="+", choices=list(GENERATED_MODES) + list(PARTIAL_PATTERNS),
-                        help="Default uni-hoi: OMOMO 101, BEHAVE 011. Diagnostics: seven modes + mixed.")
+    parser.add_argument("--modes", nargs="+", type=parse_mode,
+                        help="TriDi-style H/O/C modes (1=generate, 0=condition). "
+                             "Accepts 011, sample_011, human-to-object, ... "
+                             "Default uni-hoi: OMOMO 101, BEHAVE 011. Diagnostics: seven modes + mixed.")
     parser.add_argument("--window", type=int, default=120)
     parser.add_argument("--steps", type=int, default=50)
     parser.add_argument("--projection-steps", type=int, default=0)
@@ -135,7 +138,9 @@ def main(argv=None):
                 dgroup = f"{dataset_name}:{mode}"
                 signature_counts.setdefault(dgroup, {})[signature] = signature_counts.setdefault(dgroup, {}).get(signature, 0) + 1
                 row = {"dataset": dataset_name, "sequence_id": batch["sequence_id"][0], "window_start": start,
-                       "mode": mode, "observed_signature": signature, "seed": selected_seed,
+                       "mode": mode, "mode_description": describe_mode(mode),
+                       "sampling_target": mode_to_target_name(mode) if mode in GENERATED_MODES else None,
+                       "task": task, "observed_signature": signature, "seed": selected_seed,
                        "samples_per_window": args.samples_per_window, "selected_sample_index": chosen,
                        "selection": "minimum_MPJPE_same_sample_for_all_metrics" if len(candidates) > 1 else "single_sample",
                        "text_conditioned": args.text_conditioned, "diagnostics": diagnostic,

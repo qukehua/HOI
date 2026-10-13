@@ -39,6 +39,9 @@ swanlab_run_name: null
 swanlab_workspace: null
 swanlab_mode: online
 holdout_signatures: []
+# Optional TriDi-style mode whitelist (H/O/C, 1=generate, 0=condition).
+# Omit to train on all seven full modes plus sparse patterns.
+# allowed_patterns: ["101", "011", "111"]
 model:
   width: 192
   heads: 6

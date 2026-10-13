@@ -35,17 +35,24 @@ modality as fully known.
 holdout_signatures=(), allowed_patterns=None, max_attempts=128)` samples each
 example independently. A supplied `torch.Generator` makes sampling repeatable.
 
-Seven TriDi-style modes use **generated bits** in H/O/C order:
+Seven TriDi-style modes use **generated bits** in H/O/C order
+(`1` = generate, `0` = fully condition). This is the same convention as TriDi's
+`sample.mode` (human / object / interaction≈contact). Prefer the digit string
+as the public handle; task names are aliases only.
 
-| Mode | Fully observed | Generated |
-| --- | --- | --- |
-| `100` | O,C | H |
-| `010` | H,C | O |
-| `001` | H,O | C |
-| `110` | C | H,O |
-| `101` | O | H,C |
-| `011` | H | O,C |
-| `111` | none | H,O,C |
+| Mode | Fully observed | Generated | Alias / TriDi target |
+| --- | --- | --- | --- |
+| `100` | O,C | H | `sbj` |
+| `010` | H,C | O | `obj` |
+| `001` | H,O | C | `contact` |
+| `110` | C | H,O | `sbj_obj` |
+| `101` | O | H,C | object-to-human / `sbj_contact` |
+| `011` | H | O,C | human-to-object / `obj_contact` |
+| `111` | none | H,O,C | text-to-hoi / `sbj_obj_contact` |
+
+CLI accepts `011`, TriDi form `sample_011`, and aliases such as
+`human-to-object` via `parse_mode()`. `describe_mode()` / `mode_to_target_name()`
+print the condition/generate split and TriDi folder name.
 
 `000` is rejected because there is no generation target. Partial modes are
 `human_keyframes`, `object_waypoints`, `contact_intervals`, `root_path`

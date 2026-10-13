@@ -22,6 +22,80 @@ PARTIAL_PATTERNS = (
     "human_object", "human_contact", "object_contact",
 )
 _SYMBOLS = ("H", "O", "C")
+# TriDi / Uni-HOI task aliases → generated-bit mode (H/O/C, 1=generate, 0=condition).
+MODE_ALIASES = {
+    "object-to-human": "101",
+    "o2h": "101",
+    "human-to-object": "011",
+    "h2o": "011",
+    "text-to-hoi": "111",
+    "t2hoi": "111",
+}
+# TriDi folder naming uses sbj for the human modality.
+_TRIDI_MODALITY_NAMES = {"human": "sbj", "object": "obj", "contact": "contact"}
+
+
+def parse_mode(spec: str) -> str:
+    """Normalize a TriDi-style control pattern to an internal mode string.
+
+    Accepts generated-bit modes (`011`), TriDi CLI form (`sample_011` /
+    `sample.mode=011`), Uni-HOI task aliases (`human-to-object`), and sparse
+    partial patterns (`mixed`, `human_object`, ...). Contact is the interaction
+    channel (TriDi's third bit).
+    """
+    if not isinstance(spec, str) or not spec.strip():
+        raise ValueError("mode must be a nonempty string such as '011' or 'sample_011'")
+    raw = spec.strip()
+    if raw.startswith("sample.mode="):
+        raw = raw.split("=", 1)[1].strip().strip("\"'")
+    if raw.startswith("sample_"):
+        raw = raw[len("sample_"):]
+    key = raw.lower().replace(" ", "")
+    if key in MODE_ALIASES:
+        return MODE_ALIASES[key]
+    if raw in GENERATED_MODES or raw in PARTIAL_PATTERNS:
+        return raw
+    raise ValueError(
+        f"unknown mode {spec!r}; use a generated-bit string in H/O/C order "
+        f"(1=generate, 0=condition), TriDi 'sample_011', a task alias "
+        f"({', '.join(sorted(MODE_ALIASES))}), or a partial pattern"
+    )
+
+
+def mode_bits(mode: str) -> tuple[str, str, str]:
+    """Return the three generated bits for a full-modality mode."""
+    mode = parse_mode(mode)
+    if mode not in GENERATED_MODES:
+        raise ValueError(f"{mode!r} is a partial pattern, not a generated-bit mode")
+    return tuple(mode)  # type: ignore[return-value]
+
+
+def mode_conditioned(mode: str) -> tuple[str, ...]:
+    """Modalities fully observed (bit 0) for a generated-bit mode."""
+    return tuple(name for bit, name in zip(mode_bits(mode), MODALITIES) if bit == "0")
+
+
+def mode_generated(mode: str) -> tuple[str, ...]:
+    """Modalities to generate (bit 1) for a generated-bit mode."""
+    return tuple(name for bit, name in zip(mode_bits(mode), MODALITIES) if bit == "1")
+
+
+def mode_to_target_name(mode: str) -> str:
+    """TriDi-style sampling-target folder name, e.g. ``011`` → ``obj_contact``."""
+    names = [_TRIDI_MODALITY_NAMES[name] for name in mode_generated(mode)]
+    if not names:
+        raise ValueError("mode has no generated modalities")
+    return "_".join(names)
+
+
+def describe_mode(mode: str) -> str:
+    """Human-readable condition/generate summary for logs and CLI help."""
+    mode = parse_mode(mode)
+    if mode in GENERATED_MODES:
+        conditioned = "+".join(mode_conditioned(mode)) or "none"
+        generated = "+".join(mode_generated(mode))
+        return f"{mode}: condition {conditioned}; generate {generated}"
+    return f"{mode}: sparse/partial control pattern"
 
 
 def _validate_states(states: Mapping[str, Tensor], valid_frames: Tensor) -> None:
@@ -205,10 +279,17 @@ def sample_controls(
     if max_attempts < 1:
         raise ValueError("max_attempts must be positive")
     all_patterns = GENERATED_MODES + PARTIAL_PATTERNS
-    pool = tuple(all_patterns if allowed_patterns is None else allowed_patterns)
+    if allowed_patterns is None:
+        pool = all_patterns
+    else:
+        try:
+            pool = tuple(parse_mode(pattern) for pattern in allowed_patterns)
+        except ValueError as exc:
+            raise ValueError("allowed_patterns must be a nonempty list of supported patterns") from exc
     if not pool or any(pattern not in all_patterns for pattern in pool):
         raise ValueError("allowed_patterns must be a nonempty list of supported patterns")
     if mode is not None:
+        mode = parse_mode(mode)
         if mode not in all_patterns or (allowed_patterns is not None and mode not in pool):
             raise ValueError(f"mode {mode!r} is unsupported or excluded by allowed_patterns")
         pool = (mode,)

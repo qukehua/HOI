@@ -8,8 +8,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from .controls import (ControlBatch, GENERATED_MODES, PARTIAL_PATTERNS, check_anchor_feasibility,
-                       compile_controls, sample_controls)
+from .controls import (ControlBatch, check_anchor_feasibility, compile_controls, describe_mode,
+                       parse_mode, sample_controls)
 from .data import load_record
 from .runtime import device_for, load_model, move_batch, write_json
 
@@ -92,8 +92,9 @@ def main():
     inputs.add_argument("--scene", help="NPZ with only object_points, rest_offsets, fps; no target motion required")
     conditions = parser.add_mutually_exclusive_group()
     conditions.add_argument("--controls", help="Explicit JSON observations; from_reference must be requested per entry")
-    conditions.add_argument("--mode", choices=(*GENERATED_MODES, *PARTIAL_PATTERNS),
-                            help="Benchmark masks taken from reference: 1=generate, 0=condition, ordered H/O/C")
+    conditions.add_argument("--mode", type=parse_mode,
+                            help="TriDi-style H/O/C mode from reference (1=generate, 0=condition). "
+                                 "Accepts 011, sample_011, human-to-object, or sparse patterns")
     parser.add_argument("--human-prior", help="Canonical human reference produced by Kimodo bridge")
     parser.add_argument("--text-features", help="Optional actual cached text embedding .npy")
     parser.add_argument("--frames", type=int)
@@ -131,6 +132,7 @@ def main():
     elif args.mode:
         controls = sample_controls(batch, batch["valid_frames"], args.mode,
                                    generator=torch.Generator().manual_seed(args.seed))
+        print(describe_mode(args.mode), flush=True)
     else:
         controls = ControlBatch.empty_like(batch, batch["valid_frames"])
     if args.human_prior:
@@ -163,6 +165,7 @@ def main():
     np.savez_compressed(output, **arrays)
     write_json(output.with_suffix(".metrics.json"), {"metrics": report, "anchor_feasibility": feasibility,
                "checkpoint_step": checkpoint["step"], "seed": args.seed, "controls": list(controls.signatures),
+               "mode": args.mode, "mode_description": describe_mode(args.mode) if args.mode else None,
                "physical_execution_validated": False})
     print(str(output.resolve()))
 

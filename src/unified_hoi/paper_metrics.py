@@ -18,6 +18,7 @@ from .geometry import SMPL_PARENTS, forward_kinematics, rotation6d_to_matrix
 TEXT_METRICS = ("FID", "R_precision_top1", "R_precision_top2", "R_precision_top3", "Diversity")
 HUMAN_METRICS = ("HandJPE_cm", "MPJPE_cm", "C_prec", "C_rec", "C_acc", "c_percent")
 OBJECT_METRICS = ("E_ch_m", "E_v2v_m")
+# Primary public handle is the TriDi-style generated-bit mode (H/O/C).
 MODE_TASKS = {"101": "object-to-human", "011": "human-to-object", "111": "text-to-hoi"}
 
 

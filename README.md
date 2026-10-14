@@ -269,7 +269,7 @@ python scripts/cache_text.py --manifest data/processed/behave/manifest.jsonl --o
 
 ```bash
 python -m unified_hoi.train --config configs/train_behave.yaml --output runs/behave_text_seed42 --max-steps 1000
-python scripts/benchmark.py --checkpoint runs/behave_text_seed42/last.pt --manifest data/processed/behave_with_text.jsonl --text-conditioned --modes 111 --output runs/eval_behave_text_seed42 --save-predictions
+python scripts/benchmark.py --profile uni-hoi --checkpoint runs/behave_text_seed42/last.pt --manifest data/processed/behave_with_text.jsonl --text-conditioned --modes 111 --output runs/eval_behave_text_seed42 --save-predictions
 ```
 
 训练命令会读取train并周期性验证val；benchmark只读取test。全部片段已逐项核对与源数据切片一致，文本分支梯度非零，真实小样本通过2步CPU训练、2次验证和测试集文本条件采样。模型训练完成前，流程检查结果不能代表文本生成质量。完整验证报告见 `data/processed/behave/verification_report.json`。
@@ -453,13 +453,13 @@ python -m unified_hoi.sample \
 
 ## 8. 在测试集上做定量评估
 
-默认评估已改为 **Uni-HOI（arXiv:2604.27491v2）按任务使用的指标**：
+默认按数据集选择指标：BEHAVE 使用 **TriDi**（模式 `011`：OBJ_V2V、OBJ_CENTER、CONTACT_*，并计算 generation 指标）。OMOMO 仍使用 **Uni-HOI（arXiv:2604.27491v2）**。BEHAVE 改回 Uni-HOI 时传 `--profile uni-hoi`。
 
-| 任务 | 数据集 | 模式 | 主指标 |
+| 任务 | 数据集 | 模式 | 默认主指标 |
 | --- | --- | --- | --- |
-| 物体动作 → 人体动作 | OMOMO / FullBodyManipulation | `101` | HandJPE、MPJPE（cm）、C_prec、C_rec、C_acc、c% |
-| 人体动作 → 物体动作 | BEHAVE | `011` | E_ch、E_v2v（m） |
-| 文本 → HOI | BEHAVE、OMOMO | `111` + 文本 | FID、R-Precision Top-1/2/3、Diversity |
+| 物体动作 → 人体动作 | OMOMO / FullBodyManipulation | `101` | Uni-HOI：HandJPE、MPJPE（cm）、C_prec、C_rec、C_acc、c% |
+| 人体动作 → 物体动作 | BEHAVE | `011` | TriDi：OBJ_V2V、OBJ_CENTER、CONTACT_* |
+| 文本 → HOI | BEHAVE、OMOMO | `111` + 文本，且 `--profile uni-hoi` | FID、R-Precision Top-1/2/3、Diversity |
 
 其中 HandJPE 使用世界坐标；MPJPE 使用各自骨盆对齐后的24关节。接触指标根据双手与原始物体网格顶点的5cm距离重新计算，不使用模型的22维接触输出，也不只检查已知锚点。c%按论文表格输出0–1比例。E_v2v使用对应的完整mesh顶点；E_ch使用每侧10000个独立表面采样点，计算双向非平方距离之和。论文正文写E_ch、表3写E_c，代码保留明确的E_ch名称，另附三维质心误差，避免混淆。
 
@@ -497,11 +497,11 @@ python scripts/benchmark.py \
 python scripts/benchmark.py \
   --checkpoint runs/behave_seed42/last.pt \
   --manifest data/processed/behave_with_text.jsonl \
-  --modes 011 --window 120 --steps 50 --seed 42 \
+  --window 120 --steps 50 --seed 42 \
   --output runs/eval_behave_seed42_raw --save-predictions
 ```
 
-不指定 `--modes` 时，会按记录的 dataset 字段自动对 OMOMO 跑 101、对 BEHAVE 跑 011，并按数据集/任务分组汇总。默认关闭文本条件，即使清单存在文本缓存也不会自动使用。对OMOMO复现“物体+文本→人体”设置时，需要文本训练的检查点、带缓存清单及 `--text-conditioned`。
+不指定 `--profile` 时，BEHAVE 用 TriDi，其它数据集用 Uni-HOI。不指定 `--modes` 时，会按记录的 dataset 字段自动对 OMOMO 跑 101、对 BEHAVE 跑 011，并按数据集/任务分组汇总。默认关闭文本条件，即使清单存在文本缓存也不会自动使用。对OMOMO复现“物体+文本→人体”设置时，需要文本训练的检查点、带缓存清单及 `--text-conditioned`。BEHAVE 的文本生成任务不是 TriDi 单目标模式，需要 `--profile uni-hoi --modes 111 --text-conditioned`。
 
 输出 `per_clip.jsonl` 和 `summary.json`。主指标位于summary的 `metrics`；按窗口宏平均和按帧加权均值分列，原有锚点、FK、滑移、地板及耗时诊断位于 `diagnostics_by_dataset_mode`。不要混用两种聚合方式。OMOMO原版代码支持best-of-20；本项目默认单样本，需要这一对照时传 `--samples-per-window 20 --modes 101`，以最小MPJPE选出同一个样本计算所有指标，并如实报告采样预算。Uni-HOI是否使用相同预算尚未确认。
 

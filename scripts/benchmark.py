@@ -1,4 +1,4 @@
-"""Uni-HOI task evaluation on held-out windows, with separate control diagnostics."""
+"""Held-out evaluation. BEHAVE defaults to TriDi; other datasets default to Uni-HOI."""
 import argparse
 import hashlib
 import json
@@ -16,6 +16,9 @@ from unified_hoi.evaluate import evaluate_batch
 from unified_hoi.paper_metrics import MODE_TASKS, add_asset_arguments, assets_from_args, evaluate_paper_sequence
 from unified_hoi.runtime import device_for, load_model, move_batch, write_json
 
+# Used when --modes is omitted. BEHAVE 011 is object generation; OMOMO 101 is human generation.
+DEFAULT_DATASET_MODES = {"omomo": ["101"], "behave": ["011"]}
+
 
 def _accumulate(groups, group, metrics, frames):
     for key, value in metrics.items():
@@ -30,17 +33,31 @@ def _summarize(groups):
             for group, metrics in groups.items()}
 
 
+def _tridi_unsupported(modes):
+    return [m for m in modes if m not in GENERATED_MODES or m.count("1") < 1
+            or (m[0] == "1" and m[1] == "1")]
+
+
+def _resolved_profile(requested, dataset_name):
+    """``auto`` scores BEHAVE with TriDi and every other dataset with Uni-HOI."""
+    if requested != "auto":
+        return requested
+    return "tridi" if dataset_name == "behave" else "uni-hoi"
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--output", required=True)
-    parser.add_argument("--profile", choices=("uni-hoi", "diagnostics", "tridi"), default="uni-hoi",
-                        help="tridi: Reconstruction (OBJ_*/MPJPE/contacts) + Generation (1-NNA/COV/MMD/SD)")
+    parser.add_argument("--profile", choices=("auto", "tridi", "uni-hoi", "diagnostics"), default="auto",
+                        help="auto (default): BEHAVE uses tridi, other datasets use uni-hoi. "
+                             "tridi: Reconstruction (OBJ_*/MPJPE/contacts) + Generation "
+                             "(1-NNA/COV/MMD/SD). uni-hoi: paper task metrics. diagnostics: controls only.")
     parser.add_argument("--modes", nargs="+", type=parse_mode,
                         help="TriDi-style H/O/C modes (1=generate, 0=condition). "
                              "Accepts 011, sample_011, human-to-object, ... "
-                             "Default uni-hoi: OMOMO 101, BEHAVE 011. Diagnostics: seven modes + mixed.")
+                             "Default: OMOMO 101, BEHAVE 011. Diagnostics: seven modes + mixed.")
     parser.add_argument("--window", type=int, default=120)
     parser.add_argument("--steps", type=int, default=50)
     parser.add_argument("--projection-steps", type=int, default=0)
@@ -60,17 +77,23 @@ def main(argv=None):
         raise ValueError("limit, samples-per-window and chamfer-samples must be positive")
     if args.profile == "uni-hoi" and args.modes and "111" in args.modes and not args.text_conditioned:
         raise ValueError("Uni-HOI table 1 needs --text-conditioned and real cached text; unconditional 111 is a different task")
-    if args.samples_per_window > 1 and (args.profile != "uni-hoi" or args.modes not in (None, ["101"])):
+    if args.samples_per_window > 1 and args.profile not in ("uni-hoi", "auto"):
         raise ValueError("best-of-K is supported only for uni-hoi object-to-human (101)")
-    if args.profile == "tridi":
-        # Optional TriDi dependencies must not block Uni-HOI/mesh diagnostics.
-        from unified_hoi.tridi_metrics import collect_split_features, evaluate_tridi_sequence, generation_metrics
-        if not args.modes:
-            raise ValueError("profile=tridi requires explicit --modes (e.g. 010 100)")
-        unsupported = [m for m in args.modes if m not in GENERATED_MODES or m.count("1") < 1
-                       or (m[0] == "1" and m[1] == "1")]
+    if args.samples_per_window > 1 and args.modes not in (None, ["101"]):
+        raise ValueError("best-of-K is supported only for uni-hoi object-to-human (101)")
+    if args.profile == "tridi" and args.modes:
+        unsupported = _tridi_unsupported(args.modes)
         if unsupported:
             raise ValueError(f"tridi profile supports single-target modes 010/011/100/101; got {unsupported}")
+    tridi_mod = None
+
+    def load_tridi():
+        nonlocal tridi_mod
+        if tridi_mod is None:
+            # Optional TriDi dependencies must not block Uni-HOI/mesh diagnostics.
+            from unified_hoi import tridi_metrics
+            tridi_mod = tridi_metrics
+        return tridi_mod
     output = Path(args.output)
     if any((output / name).exists() for name in ("per_clip.jsonl", "summary.json", "feature_inputs.jsonl")):
         raise FileExistsError("Benchmark output exists; choose a new directory")
@@ -85,22 +108,30 @@ def main(argv=None):
     output.mkdir(parents=True, exist_ok=True)
     primary, diagnostics, grouped, signature_counts, task_status = {}, {}, {}, {}, {}
     feature_inputs = []
-    tridi_features = {mode: {"generated": [], "reference": []} for mode in (args.modes or [])}
+    tridi_features = {}
     excluded = [s for s in signatures if args.observed_signatures and s not in args.observed_signatures]
     with (output / "per_clip.jsonl").open("w", encoding="utf-8") as stream:
         for index, batch in enumerate(DataLoader(dataset, batch_size=1, shuffle=False)):
             if args.limit is not None and index >= args.limit:
                 break
             dataset_name = batch["dataset"][0]
+            profile = _resolved_profile(args.profile, dataset_name)
             modes = args.modes
             if modes is None:
-                if args.profile == "diagnostics":
+                if profile == "diagnostics":
                     modes = list(GENERATED_MODES) + ["mixed"]
                 else:
-                    modes = {"omomo": ["101"], "behave": ["011"]}.get(dataset_name)
+                    modes = DEFAULT_DATASET_MODES.get(dataset_name)
                     if modes is None:
-                        raise ValueError(f"No Uni-HOI task mapping for {dataset_name}")
-            if args.samples_per_window > 1 and modes != ["101"]:
+                        raise ValueError(f"No default task mapping for dataset {dataset_name}")
+            if profile == "tridi":
+                load_tridi()
+                unsupported = _tridi_unsupported(modes)
+                if unsupported:
+                    raise ValueError(f"tridi profile supports single-target modes 010/011/100/101; got {unsupported}")
+            if profile == "uni-hoi" and "111" in modes and not args.text_conditioned:
+                raise ValueError("Uni-HOI table 1 needs --text-conditioned and real cached text; unconditional 111 is a different task")
+            if args.samples_per_window > 1 and (profile != "uni-hoi" or modes != ["101"]):
                 raise ValueError("best-of-K cannot be applied to human-to-object or text-to-HOI")
             if args.text_conditioned:
                 if not bool(batch["text_available"].all()):
@@ -118,8 +149,8 @@ def main(argv=None):
                 control = sample_controls(batch, batch["valid_frames"], mode=mode,
                                           generator=torch.Generator().manual_seed(seed), holdout_signatures=excluded)
                 task = MODE_TASKS.get(mode)
-                paper_enabled = args.profile == "uni-hoi" and task is not None
-                tridi_enabled = args.profile == "tridi"
+                paper_enabled = profile == "uni-hoi" and task is not None
+                tridi_enabled = profile == "tridi"
                 if (paper_enabled and task not in (None, "text-to-hoi", "object-contact-to-human")) or tridi_enabled:
                     assets.mesh(record)
                     if dataset_name == "omomo" and paper_enabled:
@@ -142,7 +173,7 @@ def main(argv=None):
                                                         text_conditioned=args.text_conditioned,
                                                         chamfer_samples=args.chamfer_samples, seed=seed)
                     elif tridi_enabled:
-                        paper = evaluate_tridi_sequence(result, control, record, assets=assets, start=start, mode=mode)
+                        paper = tridi_mod.evaluate_tridi_sequence(result, control, record, assets=assets, start=start, mode=mode)
                     else:
                         paper = None
                     evaluation_seconds += time.perf_counter() - before
@@ -165,8 +196,8 @@ def main(argv=None):
                        "task": task, "observed_signature": signature, "seed": selected_seed,
                        "samples_per_window": args.samples_per_window, "selected_sample_index": chosen,
                        "selection": "minimum_MPJPE_same_sample_for_all_metrics" if len(candidates) > 1 else "single_sample",
-                       "text_conditioned": args.text_conditioned, "diagnostics": diagnostic,
-                       "metrics": paper["metrics"] if paper else diagnostic}
+                       "text_conditioned": args.text_conditioned, "metric_profile": profile,
+                       "diagnostics": diagnostic, "metrics": paper["metrics"] if paper else diagnostic}
                 if paper:
                     row["paper_evaluation" if not tridi_enabled else "tridi_evaluation"] = {
                         k: v for k, v in paper.items() if k != "features"
@@ -179,10 +210,11 @@ def main(argv=None):
                                                   "protocol": paper.get("protocol"),
                                                   "protocol_notes": paper.get("protocol_notes", [])})["windows"] += 1
                     if tridi_enabled and "features" in paper:
-                        tridi_features[mode]["generated"].append(paper["features"]["generated"])
-                        tridi_features[mode]["reference"].append(paper["features"]["reference"])
-                        tridi_features[mode]["kind"] = paper["features"]["kind"]
-                elif args.profile == "diagnostics":
+                        bags = tridi_features.setdefault(mode, {"generated": [], "reference": []})
+                        bags["generated"].append(paper["features"]["generated"])
+                        bags["reference"].append(paper["features"]["reference"])
+                        bags["kind"] = paper["features"]["kind"]
+                elif profile == "diagnostics":
                     _accumulate(primary, dgroup, diagnostic, frames)
                 _accumulate(diagnostics, dgroup, diagnostic, frames)
                 _accumulate(grouped, dgroup + ":" + signature, diagnostic, frames)
@@ -214,7 +246,7 @@ def main(argv=None):
             if (index + 1) % 20 == 0:
                 print(f"Evaluated {index + 1}/{min(args.limit or len(dataset), len(dataset))} test windows", flush=True)
     generation = {}
-    if args.profile == "tridi":
+    if any(bags.get("generated") for bags in tridi_features.values()):
         print("Computing TriDi generation metrics...", flush=True)
         for mode, bags in tridi_features.items():
             if not bags["generated"]:
@@ -222,16 +254,21 @@ def main(argv=None):
             gen = np.concatenate(bags["generated"], axis=0)
             ref = np.concatenate(bags["reference"], axis=0)
             kind = bags["kind"]
-            train = collect_split_features(args.manifest, "train", args.window, kind, model.config.text_dim)
-            generation[mode] = generation_metrics(gen, ref, train)
+            train = tridi_mod.collect_split_features(args.manifest, "train", args.window, kind, model.config.text_dim)
+            generation[mode] = tridi_mod.generation_metrics(gen, ref, train)
             print(f"  mode {mode}: {generation[mode]}", flush=True)
     if feature_inputs:
         (output / "feature_inputs.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in feature_inputs), encoding="utf-8")
-    notes = ("TriDi-aligned reconstruction + generation; contact on representation joints "
-             "(not SMPL decimated verts). Units: metres for MPJPE/OBJ_*; contact as percent."
-             if args.profile == "tridi" else
-             "Metric definitions follow Uni-HOI/referenced code; splits, 10fps windows, repetition "
-             "and trained text evaluator are not verified against Uni-HOI.")
+    if args.profile == "tridi":
+        notes = ("TriDi-aligned reconstruction + generation; contact on representation joints "
+                 "(not SMPL decimated verts). Units: metres for MPJPE/OBJ_*; contact as percent.")
+    elif args.profile == "auto":
+        notes = ("Default metrics are per dataset: BEHAVE uses TriDi reconstruction + generation "
+                 "(mode 011: OBJ_V2V / OBJ_CENTER / CONTACT_* unless --modes is set); "
+                 "other datasets use Uni-HOI. Pass --profile uni-hoi to score BEHAVE with E_ch/E_v2v.")
+    else:
+        notes = ("Metric definitions follow Uni-HOI/referenced code; splits, 10fps windows, repetition "
+                 "and trained text evaluator are not verified against Uni-HOI.")
     write_json(output / "summary.json", {"config": vars(args), "aggregation": "separate dataset/task groups; macro per window and frame-weighted means",
                "observed_signatures": signature_counts, "metrics": _summarize(primary),
                "generation": generation, "task_status": task_status,

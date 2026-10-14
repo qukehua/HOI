@@ -1,8 +1,11 @@
 # Uni-HOI evaluation protocol
 
-The default CLI/benchmark profile is now `uni-hoi`, following the user's PDF
+The default benchmark profile is per dataset. BEHAVE uses `tridi`
+(OBJ_V2V / OBJ_CENTER / contact reconstruction plus generation metrics on mode
+`011`). Other datasets, including OMOMO, use `uni-hoi`, following
 **Uni-HOI, arXiv:2604.27491v2 (11 September 2026)**, section 4.1 and tables 1-3.
-Metrics depend on the **task**, not only on the dataset.
+Pass `--profile uni-hoi` to score BEHAVE with the Uni-HOI table-3 metrics
+(E_ch / E_v2v). Uni-HOI metrics depend on the **task**, not only on the dataset.
 
 | Paper task | Dataset in the paper | Project mode | Primary metrics |
 | --- | --- | --- | --- |
@@ -170,16 +173,23 @@ reference evaluator's actual protocol. The CLI requires them explicitly.
 ## Entry points and aggregation
 
 ```bash
-# Evaluate each dataset with the checkpoint trained on that dataset.
+# OMOMO defaults to Uni-HOI (mode 101). BEHAVE defaults to TriDi (mode 011).
 python scripts/benchmark.py \
   --checkpoint runs/omomo_seed42/last.pt \
   --manifest data/processed/omomo_combined.jsonl \
-  --modes 101 --output runs/eval_omomo --save-predictions
+  --output runs/eval_omomo --save-predictions
 
 python scripts/benchmark.py \
   --checkpoint runs/behave_seed42/last.pt \
   --manifest data/processed/behave_with_text.jsonl \
-  --modes 011 --output runs/eval_behave --save-predictions
+  --output runs/eval_behave_tridi --save-predictions
+
+# Uni-HOI table-3 metrics for BEHAVE.
+python scripts/benchmark.py \
+  --profile uni-hoi --modes 011 \
+  --checkpoint runs/behave_seed42/last.pt \
+  --manifest data/processed/behave_with_text.jsonl \
+  --output runs/eval_behave_unihoi --save-predictions
 
 # Existing mixed-control experiments remain available.
 python scripts/benchmark.py \

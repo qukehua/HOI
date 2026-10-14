@@ -18,8 +18,18 @@ from .geometry import SMPL_PARENTS, forward_kinematics, rotation6d_to_matrix
 TEXT_METRICS = ("FID", "R_precision_top1", "R_precision_top2", "R_precision_top3", "Diversity")
 HUMAN_METRICS = ("HandJPE_cm", "MPJPE_cm", "C_prec", "C_rec", "C_acc", "c_percent")
 OBJECT_METRICS = ("E_ch_m", "E_v2v_m")
+BEHAVE_HUMAN_METRICS = ("MPJPE_cm", "MPJPE_PA_cm")
 # Primary public handle is the TriDi-style generated-bit mode (H/O/C).
-MODE_TASKS = {"101": "object-to-human", "011": "human-to-object", "111": "text-to-hoi"}
+# 010/100 keep contact as an extra condition on the same generated target as 011/101.
+MODE_TASKS = {
+    "101": "object-to-human",
+    "100": "object-contact-to-human",
+    "011": "human-to-object",
+    "010": "human-contact-to-object",
+    "111": "text-to-hoi",
+}
+_OBJECT_TASKS = ("human-to-object", "human-contact-to-object")
+_HUMAN_TASKS = ("object-to-human", "object-contact-to-human")
 
 
 def array(value):
@@ -214,12 +224,50 @@ class PaperAssets:
         return offsets, scales[idx]
 
 
+def _procrustes_align(source, target):
+    """Rigid Procrustes (R,t) aligning source→target per frame; no scale."""
+    src = source - source.mean(1, keepdims=True)
+    tgt = target - target.mean(1, keepdims=True)
+    cov = np.einsum("tji,tjk->tik", src, tgt)
+    u, _, vh = np.linalg.svd(cov)
+    u, vh = u.copy(), vh.copy()
+    r = np.einsum("tij,tjk->tik", vh.transpose(0, 2, 1), u.transpose(0, 2, 1))
+    flip = np.linalg.det(r) < 0
+    vh[flip, -1, :] *= -1
+    r = np.einsum("tij,tjk->tik", vh.transpose(0, 2, 1), u.transpose(0, 2, 1))
+    return np.einsum("tkj,tij->tki", src, r) + target.mean(1, keepdims=True)
+
+
+def behave_human_metrics(predicted, reference):
+    """BEHAVE-friendly joint metrics on predicted xyz (metres → cm).
+
+    Uses the representation joints directly (default 22), not OMOMO's 24-joint
+    SMPL-H decode. MPJPE is pelvis-relative; MPJPE_PA is per-frame rigid aligned.
+    """
+    pred, ref = _xyz(predicted, "predicted", 3), _xyz(reference, "reference", 3)
+    if pred.shape != ref.shape or pred.shape[1] < 1:
+        raise ValueError("human xyz metrics require matching [T,J,3]")
+    mpjpe = float(np.linalg.norm((pred - pred[:, :1]) - (ref - ref[:, :1]), axis=-1).mean() * 100)
+    aligned = _procrustes_align(pred, ref)
+    mpjpe_pa = float(np.linalg.norm(aligned - ref, axis=-1).mean() * 100)
+    return {"MPJPE_cm": mpjpe, "MPJPE_PA_cm": mpjpe_pa}, {
+        "joint_decoding": "representation_xyz",
+        "MPJPE_alignment": "pelvis_translation_only",
+        "MPJPE_PA_alignment": "per_frame_rigid_procrustes",
+        "joints": int(pred.shape[1]),
+    }
+
+
 def infer_task(controls):
     valid = array(controls.valid_frames)[0]
     full, any_known = {}, {}
     for name in ("human", "object", "contact"):
         mask = array(controls.masks[name])[0, valid]
         full[name], any_known[name] = bool(mask.all()), bool(mask.any())
+    if full["human"] and full["contact"] and not any_known["object"]:
+        return "human-contact-to-object"
+    if full["object"] and full["contact"] and not any_known["human"]:
+        return "object-contact-to-human"
     if full["human"] and not any_known["object"] and not any_known["contact"]:
         return "human-to-object"
     if full["object"] and not any_known["human"] and not any_known["contact"]:
@@ -259,21 +307,29 @@ def evaluate_paper_sequence(states, controls, record, *, assets=None, start=0, t
                       metrics=dict.fromkeys(TEXT_METRICS),
                       reason="Use evaluate_features with aligned embeddings from a trained HOI/text evaluator; raw poses or CLIP text alone cannot replace it.")
         return report
-    condition = "object" if task == "object-to-human" else "human"
-    if not np.allclose(array(controls.values[condition])[0, valid], np.asarray(record[condition])[indices], atol=1e-5, rtol=1e-5):
-        raise ValueError("paired paper metrics require conditioning that matches the reference")
+    if task in _HUMAN_TASKS:
+        conditioned = ("object", "contact") if task == "object-contact-to-human" else ("object",)
+    elif task in _OBJECT_TASKS:
+        conditioned = ("human", "contact") if task == "human-contact-to-object" else ("human",)
+    else:
+        raise ValueError(f"unsupported paper task {task}")
+    for name in conditioned:
+        if not np.allclose(array(controls.values[name])[0, valid], np.asarray(record[name])[indices],
+                           atol=1e-5, rtol=1e-5):
+            raise ValueError("paired paper metrics require conditioning that matches the reference")
     for name in ("human", "object", "contact"):
         if array(states[name]).shape != array(controls.values[name]).shape:
             raise ValueError(f"{name} prediction/control shape mismatch")
     assets = assets or PaperAssets()
-    vertices, faces, path = assets.mesh(record)
     pred_human, pred_obj = array(states["human"])[0, valid], array(states["object"])[0, valid]
     ref_human, ref_obj = np.asarray(record["human"])[indices], np.asarray(record["object"])[indices]
-    report["details"].update(valid_frames=int(valid.sum()), window_frames=length, mesh_path=path,
+    report["details"].update(valid_frames=int(valid.sum()), window_frames=length,
                               timing_verified=bool(record.get("fps_verified_by_metadata", False)))
     if task == "object-to-human":
         if str(record["dataset"]) != "omomo":
             raise ValueError("Uni-HOI table 2 is OMOMO; no verified BEHAVE 24-joint evaluation adapter")
+        vertices, faces, path = assets.mesh(record)
+        report["details"]["mesh_path"] = path
         offsets, scale = assets.omomo_metadata(record, indices)
         pred, ref = omomo_joints24(pred_human, offsets), omomo_joints24(ref_human, offsets)
         # The object trajectory is a fixed condition. Using a different predicted
@@ -291,12 +347,23 @@ def evaluate_paper_sequence(states, controls, record, *, assets=None, start=0, t
                                   joint_decoding="SMPL_H_rest_offsets24_FK", MPJPE_alignment="pelvis_translation_only",
                                   HandJPE_alignment="world", c_percent_unit="fraction_0_to_1",
                                   object_scale="original_per_frame_scale")
+    elif task == "object-contact-to-human":
+        if not np.allclose(pred_obj, ref_obj, atol=1e-5, rtol=1e-5):
+            raise ValueError("object-contact-to-human predictions must preserve the conditioned object")
+        report["metrics"], details = behave_human_metrics(pred_human[..., :3], ref_human[..., :3])
+        report["details"].update(details)
+        report["protocol_notes"].append(
+            "BEHAVE OI→H uses representation-joint xyz MPJPE/PA; not Uni-HOI table-2 OMOMO 24-joint protocol.")
     else:
+        vertices, faces, path = assets.mesh(record)
+        report["details"]["mesh_path"] = path
         ps, rs = None, None
         if str(record["dataset"]) == "omomo":
             _, rs = assets.omomo_metadata(record, indices)
             ps = np.full(len(indices), float(record["source_object_scale"]))
             report["protocol_notes"].append("OMOMO human-to-object is an extension; table 3 reports BEHAVE/GRAB.")
+        if task == "human-contact-to-object":
+            report["protocol_notes"].append("Mode 010 conditions on human+contact; metrics match table-3 object errors.")
         report["metrics"], details = object_metrics(pred_obj, ref_obj, vertices, faces,
                                                     chamfer_samples=chamfer_samples, seed=seed,
                                                     predicted_scale=ps, reference_scale=rs)

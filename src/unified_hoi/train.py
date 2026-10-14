@@ -133,7 +133,7 @@ def run_training(config, resume=None):
     device = device_for(config.get("device", "auto"))
     dataset = HOIDataset(config["manifest"], "train", config.get("window", 120),
                          config.get("stride", 60), model_config.text_dim,
-                         text_condition=text_condition)
+                         text_condition=text_condition, geometry_encoder=model_config.geometry_encoder)
     if not len(dataset):
         raise ValueError("No training windows; preprocess data and check train split first")
     if config.get("text_condition") is True and not any(
@@ -143,7 +143,7 @@ def run_training(config, resume=None):
                          "or set text_condition: false")
     validation = HOIDataset(config["manifest"], "val", config.get("window", 120),
                             config.get("window", 120), model_config.text_dim,
-                            text_condition=text_condition)
+                            text_condition=text_condition, geometry_encoder=model_config.geometry_encoder)
     model = UnifiedHOIDenoiser(model_config)
     if not resume:
         model.normalizer.fit(make_loader(dataset, config, 0, shuffle=False))
@@ -157,6 +157,8 @@ def run_training(config, resume=None):
     best_step = None
     if resume:
         saved = torch.load(resume, map_location="cpu", weights_only=False)
+        # Normalize new optional defaults before comparing an older checkpoint's config.
+        saved["config"]["model"] = ModelConfig(**saved["config"]["model"]).asdict()
         if saved["config"].get("text_condition", True) != text_condition:
             raise ValueError("Resume configuration changed text_condition; start a new run instead")
         # Changing these changes the data order, loss or conditional task distribution.

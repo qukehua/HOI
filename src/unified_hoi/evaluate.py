@@ -93,7 +93,7 @@ def evaluate_batch(states: Mapping[str, Tensor], controls: ControlBatch,
 
     Contact support comes only from explicit control masks, never predictions
     or unobserved reference contacts. Missing supports produce None, not zero.
-    Geometry uses sampled object surfaces. Floor/FK/slip are kinematic proxies;
+    Geometry uses surface samples or recorded mesh vertices. Floor/FK/slip are kinematic proxies;
     acceleration and jerk describe motion but do not measure realism.
     """
     # validate() caches signatures; validate a shallow wrapper to keep evaluation
@@ -134,6 +134,8 @@ def evaluate_batch(states: Mapping[str, Tensor], controls: ControlBatch,
     tolerance, floor = tolerance.reshape(-1, 1, 1), floor.reshape(-1, 1, 1)
     times, time_source = _timestamps(batch, valid)
     report: dict[str, Any] = {
+        "contact_geometry": ("mesh_vertices" if torch.as_tensor(batch.get("object_geometry_is_mesh", False)).all()
+                             else "sampled_surface"),
         "confidence": "kinematic_proxies_only_not_physical_validation",
         "physical_execution_evaluated": False,
         "smoothness_is_realism_metric": False,
@@ -304,6 +306,11 @@ def main(argv: list[str] | None = None) -> None:
         "floor_y_m": float(reference.get("floor_y", 0.)),
         "contact_threshold_m": float(reference.get("contact_threshold", .05)),
     }
+    if bool(np.asarray(prediction.get("object_geometry_is_mesh", False)).item()):
+        if "object_points" not in prediction or int(prediction.get("object_geometry_version", -1)) != 1:
+            raise ValueError("mesh prediction is missing its contact geometry/version")
+        batch["object_points"] = torch.as_tensor(np.asarray(prediction["object_points"], np.float32).copy())[None]
+        batch["object_geometry_is_mesh"] = True
     report = evaluate_batch(states, controls, batch)
     if args.profile == "uni-hoi":
         report["paper_evaluation"] = evaluate_paper_sequence(

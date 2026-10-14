@@ -13,6 +13,7 @@ from torch import nn
 
 from .geometry import human_in_object_frame, nearest_surface
 from .normalization import StateNormalizer
+from .mesh_geometry import BPS_COUNT, GEOMETRY_VERSION
 from .integrations._tridi_primitives import Projection, get_timestep_embedding
 
 
@@ -26,6 +27,8 @@ class ModelConfig:
     text_dim: int = 512
     relations: bool = True
     two_stage: bool = True
+    # Legacy default preserves checkpoints; production YAML explicitly uses mesh_bps.
+    geometry_encoder: str = "pointnet"
 
     def asdict(self):
         return asdict(self)
@@ -69,7 +72,13 @@ class UnifiedHOIDenoiser(nn.Module):
         self.joint_embed = nn.Parameter(torch.randn(1, 1, j, d) * .02)
         self.modality_embed = nn.Parameter(torch.randn(3, d) * .02)
         self.time_proj = Projection(d, d)
-        self.geometry_net = nn.Sequential(nn.Linear(3, d), nn.GELU(), nn.Linear(d, d))
+        if config.geometry_encoder == "mesh_bps":
+            # Ordered mesh BPS -> MLP, as in InfBaGel's object-geometry branch.
+            self.geometry_net = nn.Sequential(nn.Linear(BPS_COUNT * 3, 768), nn.ReLU(), nn.Linear(768, d))
+        elif config.geometry_encoder == "pointnet":
+            self.geometry_net = nn.Sequential(nn.Linear(3, d), nn.GELU(), nn.Linear(d, d))
+        else:
+            raise ValueError("geometry_encoder must be mesh_bps or pointnet")
         self.shape_net = Projection(j * 3, d)
         self.text_net = Projection(config.text_dim, d)
         self.fps_net = Projection(1, d)
@@ -98,7 +107,15 @@ class UnifiedHOIDenoiser(nn.Module):
         b, t, j, _ = x["human"].shape
         d = self.config.width
         text = batch.get("text_features", x["object"].new_zeros(b, self.config.text_dim))
-        geometry = self.geometry_net(batch["object_points"]).amax(1)
+        if self.config.geometry_encoder == "mesh_bps":
+            bps = batch.get("object_bps")
+            if (bps is None or bps.shape != (b, BPS_COUNT, 3) or not torch.isfinite(bps).all()
+                    or not torch.as_tensor(batch.get("object_geometry_is_mesh", False)).all()
+                    or not (torch.as_tensor(batch.get("object_geometry_version", -1)) == GEOMETRY_VERSION).all()):
+                raise ValueError("mesh_bps requires validated mesh-derived BPS and contact vertices")
+            geometry = self.geometry_net(bps.flatten(1))
+        else:
+            geometry = self.geometry_net(batch["object_points"]).amax(1)
         shape = self.shape_net(batch["rest_offsets"].flatten(1))
         fps = batch.get("fps", x["object"].new_full((b,), 30.)).reshape(b, 1).to(text)
         condition = geometry + shape + self.text_net(text) + self.fps_net(torch.log(fps.clamp_min(1)))

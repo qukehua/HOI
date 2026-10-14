@@ -661,3 +661,41 @@ python scripts/combine_manifests.py \
 | 锚点误差0但人体/物体仍不合理 | 继续检查接触几何、FK、未知部分和模型训练状态；硬条件保持不代表交互成功 |
 
 训练好当前模型后得到的是**运动学参考轨迹**。物理可执行HOI还需要带质量/惯量和关节限制的仿真模型、闭环跟踪器及真实执行反馈；接触距离、地板代理和滑移指标不能代替它们。研究动机、限制和本次已验证范围见 [METHOD.md](docs/METHOD.md) 与 [IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)。
+
+## Mesh 物体几何（2026-10-14）
+
+当前正式配置使用 `model.geometry_encoder: mesh_bps`：物体模板 mesh 的固定顺序
+1024×3 BPS 位移经 3072→768→width MLP 编码。参考 InfBaGel 的 BPS 与顶点接触做法，
+这是独立实现；没有加载其模型权重或复用其场景/consistency model。
+
+先为已有带文本清单关联 mesh（不重写动作 NPZ、文本缓存或原始数据）：
+
+```bash
+python scripts/prepare_object_meshes.py --manifest data/processed/omomo_with_text.jsonl --output data/processed/omomo_with_mesh.jsonl
+python scripts/prepare_object_meshes.py --manifest data/processed/behave_with_text.jsonl --output data/processed/behave_with_mesh.jsonl
+```
+
+迁移到 Linux 时同时复制新清单、`data/processed/object_meshes/`、原动作与文本缓存。
+训练改用新清单；`configs/unified.yaml`、`train_omomo.yaml`、`train_behave.yaml` 已切换。
+旧清单仍用于重建/文本缓存。新网络需新建实验从头训练，不能续训旧 pointnet 权重。
+旧模型配置未声明 geometry_encoder 时仍加载 pointnet，便于旧结果复查和消融。
+
+接触支持使用最多10000个确定性 mesh 顶点；少于此数重复填充，不改变最近距离。
+加载时以同一几何重新生成22关节接触代理，保持原数据阈值；不会把22关节伪称为手掌。
+当前配置启用 contact、noncontact、slip；mesh 正接触损失有2cm容差，显式非接触仍用
+记录中的接触阈值。它们是运动学代理，不是三角面精确距离、SDF或网格穿透保证。
+采样时 `--projection-steps 30` 可开启已有的最后几何修正；没有移植上游逐步引导。
+
+benchmark 使用新清单即可自动加载 mesh。单条采样使用清单对应的 `object_mesh_path`
+和 `object_mesh_scale`：
+
+```bash
+python -m unified_hoi.sample --checkpoint runs/omomo_mesh_seed42/last.pt --reference <motion.npz> --object-mesh <canonical_mesh.npz> --object-mesh-scale <recorded_scale> --mode 101 --projection-steps 30 --output <new_output.npz>
+```
+
+BEHAVE 的规范 mesh 已减去原模板顶点均值、scale=1；OMOMO 保留标注原点并使用序列记录
+的中位尺度。mesh 在物体局部坐标中，不重复做世界坐标旋转。清单构建会与旧转换的表面
+采样逐项比对，原点或尺度不匹配时拒绝。新采样文件保存实际接触顶点和BPS，可复查诊断。
+
+参考：<https://github.com/YudeZou/InfBaGel-release/blob/main/code/models/infbagel.py>，
+<https://github.com/YudeZou/InfBaGel-release/blob/main/code/guidance_loss.py>。

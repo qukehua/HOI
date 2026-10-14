@@ -11,13 +11,13 @@
 | OMOMO文本 | 保留数据中4669条有匹配文本，103个512维CLIP缓存已生成；原配置通过 `text_condition` 开关启用 | 其余67条无文本；未正式训练文本模型 |
 | BEHAVE文本 | HOI-Diff全部1613个文件、4835条描述已下载并校验；1454个动作片段、4357条有效描述已对齐，3805个512维CLIP缓存已生成 | 293条源序列划分保持不变；排除和时间裁切原因见 `behave/preparation_report.json` |
 
-完整 OMOMO 划分为 **3797 train / 422 val / 517 test**；先按源序列分组，再生成时间窗口。测试受试者sub16/17没有进入train/val。原始清单位于 `data/processed/omomo_combined.jsonl`，默认训练配置使用带缓存的 `data/processed/omomo_with_text.jsonl`。
+完整 OMOMO 划分为 **3797 train / 422 val / 517 test**；先按源序列分组，再生成时间窗口。测试受试者sub16/17没有进入train/val。原始清单位于 `data/processed/omomo_combined.jsonl`，当前默认训练配置使用带文本与mesh关联的 `data/processed/omomo_with_mesh.jsonl`。
 
 原始训练来源5280条中保留4219条，拒绝1061条；原始测试602条中保留517条，拒绝85条。拒绝范围包含mop/vacuum多部件物体及超出默认1%尺度波动阈值的序列。固定中位数尺度后的完整物体表面几何改变上界，保留序列中最大约 **8.442 mm**。详情和逐条原因见两个 `conversion_report.json`，这不是无损恢复全部原始标注。
 
 SMPL-H 不随本代码分发，下载资产仍被 Git 忽略。男女 `.pkl` 模型保留在 `data/smplx_models/smplh/`，重复的 `smplx.zip` 已移出 `data` 归档，路径见 `docs/data_cleanup_report.json`。真实模型以 `num_betas=10, use_pca=False` 通过 CPU 加载及前向检查，网格形状均为 `[1,6890,3]`；下载检查见 `data/smplx_models/smplh_download_report.json`。
 
-历史全量转换在本机 CPU 完成：10fps、1024点、194 train / 17 val / 82 test，共293条源序列。当前 `data/processed/behave/` 保存的是从这些源序列裁出的1454个文本片段，原293条完整转换文件已不在该目录。原始参数、物体网格、模型和文本标注均保留，需完整源序列时可按README重建到 `data/processed/behave_source/`。当前训练入口为 `data/processed/behave_with_text.jsonl`，与 OMOMO 分开训练/验证。
+历史全量转换在本机 CPU 完成：10fps、1024点、194 train / 17 val / 82 test，共293条源序列。当前 `data/processed/behave/` 保存的是从这些源序列裁出的1454个文本片段，原293条完整转换文件已不在该目录。原始参数、物体网格、模型和文本标注均保留，需完整源序列时可按README重建到 `data/processed/behave_source/`。当前训练入口为 `data/processed/behave_with_mesh.jsonl`，与 OMOMO 分开训练/验证。
 
 ## 已跑过的流程
 
@@ -54,3 +54,13 @@ BEHAVE文本片段清单为 `data/processed/behave_with_text.jsonl`，896 train 
 已完成运动学层面的统一条件生成框架、数据/训练/采样/评估与官方代码接入。输出为22关节人体、单刚体轨迹和粗接触代理；尚无精细手指、真实力/力矩、关节限制控制器、网格穿透保证或动力学仿真闭环。
 
 用户最终关注的“可执行HOI”还需要独立的物理跟踪与执行反馈阶段。现在的研究原型可用于建立条件生成基线、测试关系约束方案；不能称为已经实现可执行交互或已经验证新颖性的最终论文系统。
+
+## Mesh BPS 编码变更（2026-10-14）
+
+新增mesh资产关联、1024×3 BPS/MLP、确定性mesh顶点接触与一致标签、分块最近顶点查询。
+训练、单条采样和benchmark均支持mesh_bps；旧pointnet检查点保留加载路径。
+新配置需要重新训练；此项实现不代表生成质量或物理可执行性已经得到提升。
+
+已完成全量mesh关联：OMOMO 4736条记录、13个物体；BEHAVE 1454条记录、18个物体。每条均核对原点与尺度，原始动作和文本缓存保持不变。
+
+变更后全套测试 **174项通过**，Ruff与`git diff --check`通过。两个数据集分别用当前完整网络（7,145,457参数）完成CPU验证：16帧窗口、2步训练、检查点保存/重载、2步采样、2次最终几何修正、离线评估及benchmark诊断。输出有限，硬锚点MAE为0，评估使用mesh顶点。报告：`runs/verification/mesh_bps_20261014/report.json`。这些是程序流程检查；尚未验证120帧CUDA正式训练、收敛效果或生成质量提升。

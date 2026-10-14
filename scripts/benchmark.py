@@ -15,7 +15,6 @@ from unified_hoi.data import HOIDataset, load_record
 from unified_hoi.evaluate import evaluate_batch
 from unified_hoi.paper_metrics import MODE_TASKS, add_asset_arguments, assets_from_args, evaluate_paper_sequence
 from unified_hoi.runtime import device_for, load_model, move_batch, write_json
-from unified_hoi.tridi_metrics import collect_split_features, evaluate_tridi_sequence, generation_metrics
 
 
 def _accumulate(groups, group, metrics, frames):
@@ -64,6 +63,8 @@ def main(argv=None):
     if args.samples_per_window > 1 and (args.profile != "uni-hoi" or args.modes not in (None, ["101"])):
         raise ValueError("best-of-K is supported only for uni-hoi object-to-human (101)")
     if args.profile == "tridi":
+        # Optional TriDi dependencies must not block Uni-HOI/mesh diagnostics.
+        from unified_hoi.tridi_metrics import collect_split_features, evaluate_tridi_sequence, generation_metrics
         if not args.modes:
             raise ValueError("profile=tridi requires explicit --modes (e.g. 010 100)")
         unsupported = [m for m in args.modes if m not in GENERATED_MODES or m.count("1") < 1
@@ -76,7 +77,8 @@ def main(argv=None):
     torch.set_num_threads(4)
     device = device_for(args.device)
     model, diffusion, _ = load_model(args.checkpoint, device)
-    dataset = HOIDataset(args.manifest, "test", args.window, args.window, model.config.text_dim)
+    dataset = HOIDataset(args.manifest, "test", args.window, args.window, model.config.text_dim,
+                         geometry_encoder=model.config.geometry_encoder)
     if not len(dataset):
         raise ValueError("No test windows")
     assets = assets_from_args(args)
@@ -192,6 +194,10 @@ def main(argv=None):
                     arrays.update(fps=record["fps"], timestamps=record["timestamps"][start:end],
                                   text_conditioned=np.bool_(args.text_conditioned), dataset=np.array(dataset_name),
                                   sequence_id=record["sequence_id"], text=record["text"])
+                    if model.config.geometry_encoder == "mesh_bps":
+                        arrays.update(object_points=batch["object_points"][0].cpu().numpy(),
+                                      object_bps=batch["object_bps"][0].cpu().numpy(),
+                                      object_geometry_is_mesh=np.bool_(True), object_geometry_version=np.int32(1))
                     for name in ("human", "object", "contact"):
                         arrays[name + "_observed"] = control.values[name][0, :frames].cpu().numpy()
                         arrays[name + "_mask"] = control.masks[name][0, :frames].cpu().numpy()

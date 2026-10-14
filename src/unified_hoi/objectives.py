@@ -17,7 +17,10 @@ def geometric_losses(states, batch, contact_target=None, contact_mask=None, thre
     distance, _ = nearest_surface(human[..., :3], obj, batch["object_points"])
     target = states["contact"].detach().clamp(0, 1) if contact_target is None else contact_target
     cmask = valid[..., None] if contact_mask is None else contact_mask & valid[..., None]
-    contact = masked_mean(distance.square(), cmask * target)
+    # InfBaGel-style contact tolerance. Existing point-cloud runs retain zero margin.
+    mesh = torch.as_tensor(batch.get("object_geometry_is_mesh", False), device=human.device)
+    margin = mesh.to(human.dtype).reshape(-1, 1, 1) * .02
+    contact = masked_mean(F.relu(distance - margin).square(), cmask * target)
     noncontact = masked_mean(F.relu(threshold - distance).square(), cmask * (1 - target))
     rotations = rotation6d_to_matrix(human[..., 3:])
     fk = forward_kinematics(rotations, batch["rest_offsets"][:, None], human[:, :, 0, :3])

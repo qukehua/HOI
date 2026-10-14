@@ -8,6 +8,8 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from .mesh_geometry import GEOMETRY_VERSION, attach_mesh_geometry, load_mesh_asset
+
 
 ARRAY_KEYS = ("human", "object", "contact", "object_points", "rest_offsets")
 META_KEYS = ("sequence_id", "dataset", "subject_id", "object_id", "text")
@@ -87,6 +89,9 @@ def read_manifest(path: str | Path) -> list[dict]:
         assignments[key] = entry["split"]
         resolved = Path(entry["path"])
         entry["path"] = str(resolved if resolved.is_absolute() else path.parent / resolved)
+        if entry.get("object_mesh_path"):
+            mesh_path = Path(entry["object_mesh_path"])
+            entry["object_mesh_path"] = str(mesh_path if mesh_path.is_absolute() else path.parent / mesh_path)
         if entry.get("text_features_path"):
             feature_path = Path(entry["text_features_path"])
             entry["text_features_path"] = str(feature_path if feature_path.is_absolute()
@@ -108,11 +113,15 @@ class HOIDataset(Dataset):
     All records in a loader must use the same object-point count and frame rate.
     """
 
-    def __init__(self, manifest, split, window, stride=None, text_dim=512, text_condition=True):
+    def __init__(self, manifest, split, window, stride=None, text_dim=512, text_condition=True,
+                 geometry_encoder="pointnet"):
         if window <= 0 or (stride is not None and stride <= 0):
             raise ValueError("window and stride must be positive")
         self.window, self.stride, self.text_dim = int(window), int(stride or window), int(text_dim)
         self.text_condition = text_condition
+        if geometry_encoder not in {"pointnet", "mesh_bps"}:
+            raise ValueError("geometry_encoder must be mesh_bps or pointnet")
+        self.geometry_encoder = geometry_encoder
         self.split = split
         self.text_generator = None
         self.records = [r for r in read_manifest(manifest) if r["split"] == split]
@@ -120,6 +129,16 @@ class HOIDataset(Dataset):
         point_counts, frame_rates = set(), set()
         for idx, entry in enumerate(self.records):
             rec = load_record(entry["path"])
+            if self.geometry_encoder == "mesh_bps":
+                if not entry.get("object_mesh_path") or entry.get("object_geometry_version") != GEOMETRY_VERSION:
+                    raise ValueError("mesh_bps requires object_mesh_path and geometry version; "
+                                     "run scripts/prepare_object_meshes.py")
+                scale = entry.get("object_mesh_scale")
+                if scale is None or not np.isfinite(scale) or scale <= 0:
+                    raise ValueError("object_mesh_scale must be finite and positive")
+                if "source_object_scale" in rec and not np.isclose(scale, float(rec["source_object_scale"])):
+                    raise ValueError("mesh/record object scale mismatch")
+                load_mesh_asset(str(Path(entry["object_mesh_path"]).resolve()))
             for key in ("dataset", "sequence_id"):
                 if str(scalar(rec[key])) != str(entry[key]):
                     raise ValueError(f"archive/manifest {key} mismatch: {entry['path']}")
@@ -143,6 +162,8 @@ class HOIDataset(Dataset):
         rec_idx, start, end = self.windows[index]
         entry = self.records[rec_idx]
         record = load_record(entry["path"])
+        if self.geometry_encoder == "mesh_bps":
+            record = attach_mesh_geometry(record, entry["object_mesh_path"], entry["object_mesh_scale"])
         length = end - start
         output = {}
         for key in ("human", "object", "contact"):
@@ -152,6 +173,10 @@ class HOIDataset(Dataset):
             output[key] = torch.from_numpy(value.copy())
         for key in ("object_points", "rest_offsets"):
             output[key] = torch.as_tensor(np.asarray(record[key], dtype=np.float32).copy())
+        if self.geometry_encoder == "mesh_bps":
+            output["object_bps"] = torch.from_numpy(record["object_bps"].copy())
+            output["object_geometry_is_mesh"] = torch.tensor(True)
+            output["object_geometry_version"] = torch.tensor(GEOMETRY_VERSION)
         output["valid_frames"] = torch.arange(self.window) < length
         output["fps"] = torch.tensor(float(scalar(record["fps"])), dtype=torch.float32)
         output["fps_verified_by_metadata"] = torch.tensor(bool(scalar(record.get("fps_verified_by_metadata", False))))

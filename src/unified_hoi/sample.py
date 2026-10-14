@@ -11,10 +11,12 @@ import torch
 from .controls import (ControlBatch, check_anchor_feasibility, compile_controls, describe_mode,
                        parse_mode, sample_controls)
 from .data import load_record
+from .mesh_geometry import attach_mesh_geometry
 from .runtime import device_for, load_model, move_batch, write_json
 
 
-def prepare_batch(path, frames=None, start=0, text_dim=512, scene_only=False):
+def prepare_batch(path, frames=None, start=0, text_dim=512, scene_only=False, *,
+                  geometry_encoder="pointnet", object_mesh=None, object_mesh_scale=1.):
     if frames is not None and frames < 1:
         raise ValueError("frames must be positive")
     if scene_only:
@@ -29,12 +31,18 @@ def prepare_batch(path, frames=None, start=0, text_dim=512, scene_only=False):
                  "object": np.zeros((n, 9), np.float32), "contact": np.zeros((n, 22), np.float32)}
     else:
         record = load_record(path)
+        if geometry_encoder == "mesh_bps":
+            record = attach_mesh_geometry(record, object_mesh, object_mesh_scale)
         n = min(frames or len(record["human"]), len(record["human"]) - start)
         if start < 0 or n < 1:
             raise ValueError("Requested clip is outside the reference")
         fps = float(record["fps"])
         timestamps = record["timestamps"][start:start + n]
         state = {key: record[key][start:start + n] for key in ("human", "object", "contact")}
+    if scene_only and geometry_encoder == "mesh_bps":
+        record = attach_mesh_geometry(record, object_mesh, object_mesh_scale)
+    if geometry_encoder not in {"pointnet", "mesh_bps"}:
+        raise ValueError("geometry_encoder must be mesh_bps or pointnet")
     if not np.isfinite(fps) or fps <= 0:
         raise ValueError("fps must be finite and positive")
     batch = {key: torch.as_tensor(np.asarray(value, np.float32).copy())[None] for key, value in state.items()}
@@ -56,6 +64,10 @@ def prepare_batch(path, frames=None, start=0, text_dim=512, scene_only=False):
                  contact_threshold=torch.tensor([float(record.get("contact_threshold", .05))]),
                  contact_threshold_m=float(record.get("contact_threshold", .05)),
                  text_features=torch.zeros((1, text_dim)), text_available=torch.tensor([False]))
+    if geometry_encoder == "mesh_bps":
+        batch["object_bps"] = torch.from_numpy(record["object_bps"].copy())[None]
+        batch["object_geometry_is_mesh"] = torch.tensor([True])
+        batch["object_geometry_version"] = torch.tensor([int(record["object_geometry_version"])])
     return batch, timestamps, record
 
 
@@ -95,6 +107,9 @@ def main():
     conditions.add_argument("--mode", type=parse_mode,
                             help="TriDi-style H/O/C mode from reference (1=generate, 0=condition). "
                                  "Accepts 011, sample_011, human-to-object, or sparse patterns")
+    parser.add_argument("--object-mesh", help="Canonical mesh asset NPZ from prepare_object_meshes.py")
+    parser.add_argument("--object-mesh-scale", type=float, default=1.,
+                        help="Recorded object_mesh_scale from the mesh manifest; OMOMO requires its sequence scale")
     parser.add_argument("--human-prior", help="Canonical human reference produced by Kimodo bridge")
     parser.add_argument("--text-features", help="Optional actual cached text embedding .npy")
     parser.add_argument("--frames", type=int)
@@ -115,7 +130,9 @@ def main():
     device = device_for(args.device)
     model, diffusion, checkpoint = load_model(args.checkpoint, device)
     batch, timestamps, metadata = prepare_batch(args.reference or args.scene, args.frames, args.start,
-                                               model.config.text_dim, bool(args.scene))
+                                               model.config.text_dim, bool(args.scene),
+                                               geometry_encoder=model.config.geometry_encoder,
+                                               object_mesh=args.object_mesh, object_mesh_scale=args.object_mesh_scale)
     if args.scene and args.mode:
         raise ValueError("Benchmark --mode requires --reference. Use explicit --controls with a scene.")
     if args.text_features:
@@ -154,6 +171,9 @@ def main():
     arrays["fps_verified_by_metadata"] = np.bool_(batch["fps_verified_by_metadata"][0].cpu())
     arrays["text_conditioned"] = np.bool_(batch["text_available"][0].cpu())
     arrays["contact_threshold"] = np.float32(batch["contact_threshold_m"])
+    if model.config.geometry_encoder == "mesh_bps":
+        arrays.update(object_bps=batch["object_bps"][0].cpu().numpy(),
+                      object_geometry_is_mesh=np.bool_(True), object_geometry_version=np.int32(1))
     if bool(batch["floor_available"][0]):
         arrays["floor_y"] = np.float32(batch["floor_y_m"])
     for key in ("human", "object", "contact"):

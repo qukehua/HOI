@@ -68,7 +68,7 @@ def human_in_object_frame(human_positions: Tensor, object_state: Tensor) -> Tens
 
 def nearest_surface(human_positions: Tensor, object_state: Tensor, points: Tensor,
                     chunk_size: int = 32) -> tuple[Tensor, Tensor]:
-    """Unsigned sampled-surface distance and object-local nearest points.
+    """Unsigned distance to surface samples or mesh vertices, in the object frame.
 
     This is a contact proxy, not a watertight signed penetration or force test.
     """
@@ -77,9 +77,28 @@ def nearest_surface(human_positions: Tensor, object_state: Tensor, points: Tenso
     for start in range(0, local.shape[1], chunk_size):
         part = local[:, start:start + chunk_size]
         flat = part.flatten(1, 2)
-        dist = torch.cdist(flat, points)
-        vals, idx = dist.min(-1)
-        target = points.gather(1, idx[..., None].expand(-1, -1, 3))
+        if points.shape[1] <= 2048:
+            dist = torch.cdist(flat, points)
+            vals, idx = dist.min(-1)
+            target = points.gather(1, idx[..., None].expand(-1, -1, 3))
+        else:
+            # Nearest-neighbor selection is piecewise constant. Keep only selected
+            # vertices in the autograd graph, avoiding a T*J*V backward tensor.
+            targets = []
+            for qstart in range(0, flat.shape[1], 256):
+                query = flat[:, qstart:qstart + 256]
+                with torch.no_grad():
+                    best = query.new_full(query.shape[:2], float("inf"))
+                    index = torch.zeros_like(best, dtype=torch.long)
+                    for vstart in range(0, points.shape[1], 2048):
+                        dist = torch.cdist(query.detach(), points[:, vstart:vstart + 2048].detach())
+                        value, candidate = dist.min(-1)
+                        better = value < best
+                        index = torch.where(better, candidate + vstart, index)
+                        best = torch.minimum(best, value)
+                targets.append(points.gather(1, index[..., None].expand(-1, -1, 3)))
+            target = torch.cat(targets, dim=1)
+            vals = torch.linalg.vector_norm(flat - target, dim=-1)
         distances.append(vals.reshape(*part.shape[:-1]))
         nearest.append(target.reshape_as(part))
     return torch.cat(distances, 1), torch.cat(nearest, 1)

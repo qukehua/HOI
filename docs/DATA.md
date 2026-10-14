@@ -241,3 +241,13 @@ both settings of `text_condition`. Do not merge them into
 a joint training manifest. Linux/CUDA validation and formal training remain
 pending; the OMOMO source-fps assumption still applies even though both datasets
 are stored at 10 fps.
+
+## Mesh 清单扩展
+
+`scripts/prepare_object_meshes.py` 输出新的清单，为每行增加 `object_mesh_path`、
+`object_mesh_scale`、`object_geometry_version=1`，路径相对于清单。动作文件不变。
+共享mesh NPZ保存vertices/faces、来源SHA256、数据集/物体身份和原点处理记录。
+训练loader在mesh_bps模式下要求这些字段，缺失时报错，不回退到点云冒充mesh。
+输入批次新增object_bps[B,1024,3]与几何版本；object_points此时为mesh接触顶点，
+而不是旧文件的1024个表面采样点。contact标签由相同顶点集合重新计算。
+构建新文本动作片段或重新缓存文本后，对最终清单重新运行mesh关联命令。

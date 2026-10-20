@@ -1,5 +1,7 @@
-manifest: data/processed/omomo_with_mesh.jsonl
-output: runs/unified_mesh
+manifest: data/processed/omomo_with_body_fk.jsonl
+output: runs/unified_body_fk
+body_geometry_version: 1
+geometry_objective_version: 2
 seed: 42
 device: auto
 cpu_threads: 4
@@ -21,7 +23,7 @@ losses:
   denoise_contact: true
   contact: true
   noncontact: true
-  fk: false
+  fk: true
   floor: false
   slip: true
 text_dropout: 0.1
@@ -38,6 +40,7 @@ swanlab_workspace: null
 swanlab_mode: online
 holdout_signatures: []
 model:
+  relation_geometry: fk
   geometry_encoder: mesh_bps
   width: 192
   heads: 6

@@ -176,26 +176,26 @@ reference evaluator's actual protocol. The CLI requires them explicitly.
 # OMOMO defaults to Uni-HOI (mode 101). BEHAVE defaults to TriDi (mode 011).
 python scripts/benchmark.py \
   --checkpoint runs/omomo_seed42/last.pt \
-  --manifest data/processed/omomo_combined.jsonl \
+  --manifest data/processed/omomo_with_body_fk.jsonl \
   --output runs/eval_omomo --save-predictions
 
 python scripts/benchmark.py \
   --checkpoint runs/behave_seed42/last.pt \
-  --manifest data/processed/behave_with_text.jsonl \
+  --manifest data/processed/behave_with_body_fk.jsonl \
   --output runs/eval_behave_tridi --save-predictions
 
 # Uni-HOI table-3 metrics for BEHAVE.
 python scripts/benchmark.py \
   --profile uni-hoi --modes 011 \
   --checkpoint runs/behave_seed42/last.pt \
-  --manifest data/processed/behave_with_text.jsonl \
+  --manifest data/processed/behave_with_body_fk.jsonl \
   --output runs/eval_behave_unihoi --save-predictions
 
 # Existing mixed-control experiments remain available.
 python scripts/benchmark.py \
   --profile diagnostics --modes mixed human_object \
   --checkpoint runs/omomo_seed42/last.pt \
-  --manifest data/processed/omomo_combined.jsonl \
+  --manifest data/processed/omomo_with_body_fk.jsonl \
   --output runs/eval_controls
 ```
 

@@ -4,6 +4,15 @@ The converter consumes licensed official **raw sequence annotations**, not rende
 videos, TriDi frame datasets, or OMOMO's already-windowed motion vectors. No source
 dataset or SMPL model is included. No semantic text is invented from filenames.
 
+## Current runtime data
+
+Use only `omomo_with_body_fk.jsonl` and `behave_with_body_fk.jsonl` in `data/processed/`.
+Their matching motion directories, `text_features/`, and `object_meshes/` form the complete runtime dataset.
+All train/val/test records are retained. Conversion reports live in `docs/data_reports/`.
+Legacy motion copies and intermediate manifests are cleanup targets; see `docs/processed_cleanup_report.json` for execution status.
+`source_record_path` inside a final NPZ is historical provenance, not a runtime file dependency.
+Run any fresh conversion under `data/rebuild/`, following the README appendix.
+
 ## Archive format
 
 One NPZ stores one continuous sequence (or a continuous part of a sequence):
@@ -56,7 +65,7 @@ python -m unified_hoi.preprocess behave \
   --smpl-models data/smplx_models \
   --split-file data/raw/behave/split.json \
   --val-from-train 0.1 --split-seed 0 \
-  --target-fps 10 --points 1024 --output data/processed/behave
+  --target-fps 10 --points 1024 --output data/rebuild/behave_source
 ```
 
 Each sequence uses `info.json`, `smpl_fit_all.npz` (`poses`, `betas`, `trans`,
@@ -87,7 +96,7 @@ python -m unified_hoi.preprocess omomo `
   --objects D:/code/HOI/OMOMO/data/captured_objects `
   --source-fps 30 --target-fps 10 `
   --fps-provenance "Assumed 30 fps from official OMOMO visualization; raw release metadata has no rate" `
-  --output data/processed/omomo_train
+  --output data/rebuild/omomo_train
 ```
 
 **30 fps in this example is an explicit, unverified release-rate assumption.**
@@ -190,7 +199,9 @@ text encoder. Without a cache, the dataset returns zeros and `text_available=Fal
 even if verified text exists. This prevents random or fabricated embeddings from
 masquerading as text conditioning.
 
-Conversion fixtures and temporal/split checks are covered by `tests/test_data.py`.
+Conversion fixtures and temporal/split checks were exercised during development;
+the test suite and its generated outputs are included in the cleanup requested on 2026-10-16.
+See `docs/project_cleanup_report.json` for the actual execution status.
 Actual licensed-dataset geometry and body-model validation require the corresponding
 assets; passing synthetic fixtures does not establish real-data correctness.
 
@@ -216,8 +227,8 @@ The downloaded BEHAVE release contains 299 sequence directories. Three inspected
 human parameter archives have `[T,156]` poses, constant `[T,10]` betas, and actual
 `frame_times` at approximately 30 fps. SMPL-H assets are a separate download.
 The official ready-to-load male/female models are retained in `data/smplx_models/smplh/`.
-The redundant `smplx.zip` was verified against both extracted files and archived
-outside `data/`; see `docs/data_cleanup_report.json` for its recoverable location.
+The redundant `smplx.zip` was verified against both extracted files and scheduled for removal;
+see `docs/project_cleanup_report.json` for the cleanup record.
 Both pass CPU loading and a forward pass with `num_betas=10, use_pca=False`;
 see `data/smplx_models/smplh_download_report.json` for hashes and checks.
 Full BEHAVE conversion has now completed on the local CPU: 293 sequences,
@@ -229,14 +240,14 @@ conversion errors. All 293 outputs were checked against original timestamps and
 object transforms. Maximum FK error is approximately 7.46e-7 metres. Five records
 have no positive joint-to-surface contact proxy labels; no contacts were invented.
 These are historical full-source conversion results. The current
-`data/processed/behave/sequences/` contains 1,454 text-aligned clips, with reports
-in `data/processed/behave/preparation_report.json` and `verification_report.json`.
-Full source archives can be rebuilt into a separate `data/processed/behave_source/`
+`data/processed/behave_with_body_fk/` contains 1,454 text-aligned clips, with reports
+in `docs/data_reports/behave_preparation.json` and `docs/data_reports/behave_verification.json`.
+Full source archives can be rebuilt into a separate `data/rebuild/behave_source/`
 using the retained raw parameters, object meshes, and SMPL-H models.
 
 BEHAVE and OMOMO are trained and validated separately. Use
-`data/processed/behave_with_text.jsonl` for BEHAVE-only runs and
-`data/processed/omomo_with_text.jsonl` for OMOMO-only runs. These manifests support
+`data/processed/behave_with_body_fk.jsonl` for BEHAVE-only runs and
+`data/processed/omomo_with_body_fk.jsonl` for OMOMO-only runs. These manifests support
 both settings of `text_condition`. Do not merge them into
 a joint training manifest. Linux/CUDA validation and formal training remain
 pending; the OMOMO source-fps assumption still applies even though both datasets

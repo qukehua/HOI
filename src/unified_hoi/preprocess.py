@@ -16,6 +16,7 @@ from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
 
 from .data import validate_record
+from .body_metadata import body_metadata
 
 
 PARENTS = np.array([-1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8,
@@ -157,6 +158,7 @@ def convert_omomo_record(record, object_points, *, source_fps, text="", contact_
                          subject_id=subject, object_id=obj, text=text,
                          source_to_world=Z_UP_TO_Y_UP, contact_threshold=contact_threshold)
     result["source_object_scale"] = np.float64(fixed_scale)
+    result.update(body_metadata({"dataset": "omomo", "gender": record["gender"], "betas": record["betas"]}))
     result["source_object_scale_range"] = np.array([scale.min(), scale.max()], dtype=np.float64)
     result["scale_relative_range"] = np.float64(scale_spread)
     result["scale_relative_tolerance"] = np.float64(scale_relative_tolerance)
@@ -232,7 +234,7 @@ def convert_behave_record(smpl, obj, object_points, *, sequence_id, subject_id,
                          fps=source_fps, sequence_id=sequence_id, dataset="behave", subject_id=subject_id,
                          object_id=object_id, text=text, source_to_world=source_to_world,
                          contact_threshold=contact_threshold)
-    result["gender"] = str(gender)
+    result.update(body_metadata({"dataset": "behave", "gender": gender, "betas": betas[:1]}))
     result["timestamps_origin"] = "frame_times"
     result["fps_verified_by_metadata"] = True
     result["fps_provenance"] = "BEHAVE frame_times, checked against explicit source fps"

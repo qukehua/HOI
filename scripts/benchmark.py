@@ -12,6 +12,8 @@ from torch.utils.data import DataLoader
 from unified_hoi.controls import (GENERATED_MODES, describe_mode, mode_to_target_name, parse_mode,
                                   sample_controls)
 from unified_hoi.data import HOIDataset, load_record
+from unified_hoi.body_metadata import body_metadata
+from unified_hoi.body_geometry import BODY_GEOMETRY_KEYS
 from unified_hoi.evaluate import evaluate_batch
 from unified_hoi.paper_metrics import MODE_TASKS, add_asset_arguments, assets_from_args, evaluate_paper_sequence
 from unified_hoi.runtime import device_for, load_model, move_batch, write_json
@@ -61,6 +63,7 @@ def main(argv=None):
     parser.add_argument("--window", type=int, default=120)
     parser.add_argument("--steps", type=int, default=50)
     parser.add_argument("--projection-steps", type=int, default=0)
+    parser.add_argument("--ik-steps", type=int, default=90)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--text-conditioned", action="store_true", help="Require real cached text for each evaluated window")
     parser.add_argument("--save-predictions", action="store_true")
@@ -99,9 +102,10 @@ def main(argv=None):
         raise FileExistsError("Benchmark output exists; choose a new directory")
     torch.set_num_threads(4)
     device = device_for(args.device)
-    model, diffusion, _ = load_model(args.checkpoint, device)
+    model, diffusion, checkpoint = load_model(args.checkpoint, device)
     dataset = HOIDataset(args.manifest, "test", args.window, args.window, model.config.text_dim,
-                         geometry_encoder=model.config.geometry_encoder)
+                         geometry_encoder=model.config.geometry_encoder,
+                         body_geometry_version=checkpoint.get("config", {}).get("body_geometry_version"))
     if not len(dataset):
         raise ValueError("No test windows")
     assets = assets_from_args(args)
@@ -163,7 +167,7 @@ def main(argv=None):
                         torch.cuda.synchronize(device)
                     before = time.perf_counter()
                     result = diffusion.sample(model, batch, control, steps=args.steps, seed=sample_seed,
-                                              projection_steps=args.projection_steps)
+                                              projection_steps=args.projection_steps, ik_steps=args.ik_steps)
                     if device.type == "cuda":
                         torch.cuda.synchronize(device)
                     sampling_seconds += time.perf_counter() - before
@@ -223,7 +227,11 @@ def main(argv=None):
                     folder.mkdir(exist_ok=True)
                     destination = folder / f"{index:06d}_{mode}.npz"
                     arrays = {k: v[0, :frames].detach().cpu().numpy() for k, v in result.items()}
-                    arrays.update(fps=record["fps"], timestamps=record["timestamps"][start:end],
+                    arrays.update(body_metadata(record))
+                    arrays.update({k: record[k] for k in BODY_GEOMETRY_KEYS if k in record})
+                    arrays["human_position_decoding"] = np.array("root_rotation_FK")
+                    arrays.update(rest_offsets=record["rest_offsets"], subject_id=record.get("subject_id", ""),
+                                  fps=record["fps"], timestamps=record["timestamps"][start:end],
                                   text_conditioned=np.bool_(args.text_conditioned), dataset=np.array(dataset_name),
                                   sequence_id=record["sequence_id"], text=record["text"])
                     if model.config.geometry_encoder == "mesh_bps":

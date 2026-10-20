@@ -8,6 +8,7 @@ import torch
 from .geometry import matrix_to_rotation6d, rotation6d_to_matrix
 from .normalization import MODALITIES
 from .objectives import geometric_losses, reconstruction_loss
+from .kinematic_projection import kinematic_diagnostics, project_kinematics
 
 # Per-term training switches. Geometric terms default off; enable via config.losses.
 DEFAULT_LOSS_FLAGS = {
@@ -96,7 +97,8 @@ class HOIDiffusion:
         return total, {k: float(v.detach()) for k, v in metrics.items()}
 
     @torch.no_grad()
-    def sample(self, model, batch, controls, steps=50, seed=0, text_guidance=1., projection_steps=0):
+    def sample(self, model, batch, controls, steps=50, seed=0, text_guidance=1., projection_steps=0,
+               ik_steps=90, diagnostics=None):
         if not 1 <= steps <= self.steps:
             raise ValueError("Sampling steps must be between 1 and training diffusion steps")
         device = batch["object_points"].device
@@ -132,39 +134,16 @@ class HOIDiffusion:
             free = ~controls.masks[k][..., 3:].any(-1, keepdim=True)
             output[k] = torch.cat((output[k][..., :3], torch.where(free, rot, output[k][..., 3:])), -1)
         output = controls.apply(output)
-        if projection_steps:
-            output = project_relations(output, controls, batch, steps=projection_steps)
-        for k in output:
-            valid = controls.valid_frames.reshape(b, -1, *([1] * (output[k].ndim - 2)))
-            output[k] = output[k] * valid
-        return output
+        if diagnostics is not None:
+            diagnostics.update(human_before_fk=output["human"].detach().clone(),
+                               before_pose_projection=kinematic_diagnostics(output, controls, batch))
+        return project_kinematics(output, controls, batch, steps=ik_steps, contact_steps=projection_steps)
 
 
 def project_relations(states, controls, batch, steps=30, learning_rate=.01):
-    """Optimize unobserved H/O coordinates only; explicitly known 0-contact is repulsive.
+    """Compatibility entry point for pose-space IK plus contact refinement.
 
-    Partial contact constraints propagate across both entities. Hard anchors are reinserted
-    at every iteration. Incompatible constraints remain violations in the returned metrics.
+    ``learning_rate`` is retained for callers of the old Adam interface; the
+    constrained LBFGS solver uses a line search instead.
     """
-    with torch.enable_grad():
-        variables = {k: states[k].detach().clone().requires_grad_(True) for k in ("human", "object")}
-        optimizer = torch.optim.Adam(list(variables.values()), lr=learning_rate)
-        target = torch.where(controls.masks["contact"], controls.values["contact"],
-                             states["contact"].detach().clamp(0, 1))
-        for _ in range(steps):
-            optimizer.zero_grad(set_to_none=True)
-            current = controls.apply({**variables, "contact": states["contact"].detach()})
-            losses = geometric_losses(current, batch, target)
-            fidelity = sum((current[k] - states[k].detach()).square().mean() for k in variables)
-            loss = (10 * losses["contact"] + 10 * losses["noncontact"] + losses["fk"]
-                    + .1 * losses["floor"] + .005 * losses["slip"] + .2 * fidelity)
-            loss.backward()
-            optimizer.step()
-        result = {k: variables[k].detach() if k in variables else v.detach() for k, v in states.items()}
-        for key in variables:
-            rotation = matrix_to_rotation6d(rotation6d_to_matrix(result[key][..., 3:]))
-            free = ~controls.masks[key][..., 3:].any(-1, keepdim=True)
-            result[key] = torch.cat((result[key][..., :3],
-                                     torch.where(free, rotation, result[key][..., 3:])), -1)
-        result = controls.apply(result)
-    return result
+    return project_kinematics(states, controls, batch, contact_steps=steps)

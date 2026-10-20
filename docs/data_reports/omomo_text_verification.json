@@ -1,0 +1,36 @@
+{
+  "manifest": "data/processed/omomo_with_text.jsonl",
+  "sequences": 4736,
+  "with_features": 4669,
+  "without_text": 67,
+  "unique_features": 103,
+  "text_dim": 512,
+  "encoder": "openai/clip-vit-base-patch32",
+  "coverage_by_split": {
+    "train": {
+      "sequences": 3797,
+      "with_features": 3739
+    },
+    "val": {
+      "sequences": 422,
+      "with_features": 418
+    },
+    "test": {
+      "sequences": 517,
+      "with_features": 512
+    }
+  },
+  "embedding_norm_range": [
+    8.47081470489502,
+    12.150156021118164
+  ],
+  "text_projection_gradient_norm": 0.563507948997937,
+  "zeroing_text_changes_loss": true,
+  "smoke": {
+    "steps": 2,
+    "device": "cpu",
+    "window": 16,
+    "checkpoint": "D:\\code\\HOI\\runs\\omomo_text_smoke\\last.pt"
+  },
+  "note": "Data and training plumbing check only; not evidence of trained motion quality."
+}

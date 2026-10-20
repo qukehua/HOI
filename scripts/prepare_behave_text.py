@@ -191,10 +191,10 @@ def prepare(manifest, annotations, raw_root, output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", default="data/processed/behave_source/manifest.jsonl")
+    parser.add_argument("--manifest", default="data/rebuild/behave_source/manifest.jsonl")
     parser.add_argument("--annotations", default=f"data/annotations/hoi_diff/{COMMIT}")
     parser.add_argument("--raw-root", default="data/raw/behave")
-    parser.add_argument("--output", default="data/processed/behave")
+    parser.add_argument("--output", default="data/rebuild/behave")
     args = parser.parse_args()
     prepare(args.manifest, args.annotations, args.raw_root, args.output)
 

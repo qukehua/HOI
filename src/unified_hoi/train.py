@@ -119,6 +119,16 @@ def finish_swanlab(run):
 
 def run_training(config, resume=None):
     config = deepcopy(config)
+    # FK now drives every geometric objective. Old checkpoints must not silently
+    # resume with changed loss/data/normalization semantics.
+    if config.get("geometry_objective_version", 2) != 2:
+        raise ValueError("This trainer requires geometry_objective_version: 2")
+    config["geometry_objective_version"] = 2
+    if resume:
+        previous = torch.load(resume, map_location="cpu", weights_only=False)
+        if previous["config"].get("geometry_objective_version") != 2:
+            raise ValueError("Legacy checkpoint uses different geometry objectives; start a new run "
+                             "on body-FK data to refit normalization, instead of --resume")
     # Omitted switches preserve the historical behavior: use caches when present.
     text_condition = config.get("text_condition", True)
     if not isinstance(text_condition, bool):
@@ -133,7 +143,8 @@ def run_training(config, resume=None):
     device = device_for(config.get("device", "auto"))
     dataset = HOIDataset(config["manifest"], "train", config.get("window", 120),
                          config.get("stride", 60), model_config.text_dim,
-                         text_condition=text_condition, geometry_encoder=model_config.geometry_encoder)
+                         text_condition=text_condition, geometry_encoder=model_config.geometry_encoder,
+                         body_geometry_version=config.get("body_geometry_version"))
     if not len(dataset):
         raise ValueError("No training windows; preprocess data and check train split first")
     if config.get("text_condition") is True and not any(
@@ -143,7 +154,8 @@ def run_training(config, resume=None):
                          "or set text_condition: false")
     validation = HOIDataset(config["manifest"], "val", config.get("window", 120),
                             config.get("window", 120), model_config.text_dim,
-                            text_condition=text_condition, geometry_encoder=model_config.geometry_encoder)
+                            text_condition=text_condition, geometry_encoder=model_config.geometry_encoder,
+                            body_geometry_version=config.get("body_geometry_version"))
     model = UnifiedHOIDenoiser(model_config)
     if not resume:
         model.normalizer.fit(make_loader(dataset, config, 0, shuffle=False))
@@ -156,7 +168,7 @@ def run_training(config, resume=None):
     best_val_loss = float("inf")
     best_step = None
     if resume:
-        saved = torch.load(resume, map_location="cpu", weights_only=False)
+        saved = previous
         # Normalize new optional defaults before comparing an older checkpoint's config.
         saved["config"]["model"] = ModelConfig(**saved["config"]["model"]).asdict()
         if saved["config"].get("text_condition", True) != text_condition:
@@ -165,7 +177,7 @@ def run_training(config, resume=None):
         for key in ("model", "manifest", "window", "stride", "batch_size", "seed", "learning_rate",
                     "weight_decay", "balance_datasets", "holdout_signatures", "allowed_patterns",
                     "diffusion_steps", "geometry_weight", "losses", "text_dropout", "ema_decay",
-                    "gradient_clip"):
+                    "gradient_clip", "body_geometry_version", "geometry_objective_version"):
             if saved["config"].get(key) != config.get(key):
                 raise ValueError(f"Resume configuration changed {key}; start a new run instead")
         model.load_state_dict(saved["model"])
@@ -192,6 +204,9 @@ def run_training(config, resume=None):
         "train_sequences": len(dataset.records), "train_windows": len(dataset),
         "validation_windows": len(validation), "torch": torch.__version__,
         "text_condition": text_condition,
+        "body_geometry_version": config.get("body_geometry_version"),
+        "geometry_objective_version": 2,
+        "normalization_source": "current_training_windows_only",
         "training_from_scratch": True, "physical_execution_validated": False,
         "save_best": save_best,
         "reference_repos": {"tridi": "afa9631dc2b3a250588ab64026eeaa37f18f0d38",

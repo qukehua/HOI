@@ -1,5 +1,7 @@
-manifest: data/processed/behave_with_mesh.jsonl
-output: runs/behave_mesh_seed42
+manifest: data/processed/behave_with_body_fk.jsonl
+output: runs/behave_body_fk_seed42
+body_geometry_version: 1
+geometry_objective_version: 2
 seed: 42
 device: cuda:0
 cpu_threads: 4
@@ -21,7 +23,7 @@ losses:
   denoise_contact: true
   contact: true
   noncontact: true
-  fk: false
+  fk: true
   floor: false
   slip: true
 # Toggle text input for both training and validation.
@@ -44,6 +46,7 @@ holdout_signatures: []
 # Omit to train on all seven full modes plus sparse patterns.
 # allowed_patterns: ["011", "101", "111"]
 model:
+  relation_geometry: fk
   geometry_encoder: mesh_bps
   width: 192
   heads: 6

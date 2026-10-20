@@ -9,6 +9,8 @@ import torch
 from torch.utils.data import Dataset
 
 from .mesh_geometry import GEOMETRY_VERSION, attach_mesh_geometry, load_mesh_asset
+from .body_metadata import body_metadata
+from .body_geometry import validate_body_geometry
 
 
 ARRAY_KEYS = ("human", "object", "contact", "object_points", "rest_offsets")
@@ -21,6 +23,9 @@ def scalar(value):
 
 def validate_record(record: dict) -> None:
     """Reject corrupt representations; never silently invent time or coordinates."""
+    body_metadata(record)  # Validate optional mesh provenance without requiring it for old training data.
+    if "body_geometry_version" in record:
+        validate_body_geometry(record)
     human = np.asarray(record["human"])
     if human.ndim != 3 or human.shape[1:] != (22, 9) or len(human) < 1:
         raise ValueError("human must have shape [T,22,9], T >= 1")
@@ -114,7 +119,7 @@ class HOIDataset(Dataset):
     """
 
     def __init__(self, manifest, split, window, stride=None, text_dim=512, text_condition=True,
-                 geometry_encoder="pointnet"):
+                 geometry_encoder="pointnet", body_geometry_version=None):
         if window <= 0 or (stride is not None and stride <= 0):
             raise ValueError("window and stride must be positive")
         self.window, self.stride, self.text_dim = int(window), int(stride or window), int(text_dim)
@@ -129,6 +134,9 @@ class HOIDataset(Dataset):
         point_counts, frame_rates = set(), set()
         for idx, entry in enumerate(self.records):
             rec = load_record(entry["path"])
+            if body_geometry_version is not None and int(rec.get("body_geometry_version", -1)) != body_geometry_version:
+                raise ValueError("Dataset body geometry version mismatch; use the manifest from "
+                                 "scripts/prepare_body_geometry.py")
             if self.geometry_encoder == "mesh_bps":
                 if not entry.get("object_mesh_path") or entry.get("object_geometry_version") != GEOMETRY_VERSION:
                     raise ValueError("mesh_bps requires object_mesh_path and geometry version; "

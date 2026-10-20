@@ -1,4 +1,8 @@
-manifest: data/processed/omomo_combined.jsonl
+manifest: data/processed/omomo_with_body_fk.jsonl
+body_geometry_version: 1
+geometry_objective_version: 2
+# Preserve the original no-text ablation; the current manifest also contains caches.
+text_condition: false
 output: runs/relation
 seed: 42
 device: auto

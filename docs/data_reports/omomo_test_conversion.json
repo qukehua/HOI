@@ -1,0 +1,448 @@
+{
+  "dataset": "omomo",
+  "source_sequences_total": 602,
+  "source_sequences": 602,
+  "written_segments": 517,
+  "rejected": [
+    {
+      "sequence_id": "sub16_largebox_030",
+      "reason": "OMOMO obj_scale must be positive scalar or [T]",
+      "error_type": "ValueError"
+    },
+    {
+      "sequence_id": "sub16_largetable_005",
+      "reason": "sub16_largetable_005: time-varying object scale relative range 0.0112081 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_largetable_040",
+      "reason": "sub16_largetable_040: time-varying object scale relative range 0.0111693 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_plasticbox_016",
+      "reason": "sub16_plasticbox_016: time-varying object scale relative range 0.0268001 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_000",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_001",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_002",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_003",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_004",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_005",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_006",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_007",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_008",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_009",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_010",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_011",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_012",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_013",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_014",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_015",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_016",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_017",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_018",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_019",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_020",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_021",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_022",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_023",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_024",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_025",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_026",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_027",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_028",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_029",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_vacuum_030",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub16_whitechair_030",
+      "reason": "sub16_whitechair_030: time-varying object scale relative range 0.0265279 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_000",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_001",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_002",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_003",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_004",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_005",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_006",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_007",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_008",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_009",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_010",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_011",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_012",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_014",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_015",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_016",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_017",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_018",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_019",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_020",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_021",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_022",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_023",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_024",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_025",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_026",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_027",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_028",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_029",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_030",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_031",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_mop_032",
+      "reason": "articulated object: mop/vacuum",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_smallbox_017",
+      "reason": "sub17_smallbox_017: time-varying object scale relative range 0.0107295 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_smallbox_019",
+      "reason": "sub17_smallbox_019: time-varying object scale relative range 0.010418 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_smallbox_020",
+      "reason": "sub17_smallbox_020: time-varying object scale relative range 0.0115796 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_smallbox_027",
+      "reason": "sub17_smallbox_027: time-varying object scale relative range 0.0102247 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_smallbox_028",
+      "reason": "sub17_smallbox_028: time-varying object scale relative range 0.0232909 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_smallbox_039",
+      "reason": "sub17_smallbox_039: time-varying object scale relative range 0.0102426 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_smallbox_043",
+      "reason": "sub17_smallbox_043: time-varying object scale relative range 0.0208937 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_smalltable_045",
+      "reason": "sub17_smalltable_045: time-varying object scale relative range 0.0123283 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_suitcase_005",
+      "reason": "sub17_suitcase_005: time-varying object scale relative range 0.0117168 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_suitcase_006",
+      "reason": "sub17_suitcase_006: time-varying object scale relative range 0.011132 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_suitcase_008",
+      "reason": "sub17_suitcase_008: time-varying object scale relative range 0.0104123 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_suitcase_014",
+      "reason": "sub17_suitcase_014: time-varying object scale relative range 0.0135891 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_suitcase_015",
+      "reason": "sub17_suitcase_015: time-varying object scale relative range 0.0116111 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_suitcase_017",
+      "reason": "sub17_suitcase_017: time-varying object scale relative range 0.0447204 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_suitcase_018",
+      "reason": "sub17_suitcase_018: time-varying object scale relative range 0.0373858 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_suitcase_023",
+      "reason": "sub17_suitcase_023: time-varying object scale relative range 0.0144419 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    },
+    {
+      "sequence_id": "sub17_suitcase_024",
+      "reason": "sub17_suitcase_024: time-varying object scale relative range 0.012495 exceeds tolerance 0.01",
+      "error_type": "UnsupportedSequence"
+    }
+  ],
+  "source_fps": 30.0,
+  "target_fps": 10.0,
+  "val_from_train": 0,
+  "split_seed": 0,
+  "split_counts": {
+    "train": 0,
+    "val": 0,
+    "test": 517
+  },
+  "contact_definition": "joint-to-sampled-surface proxy, not measured physical contacts",
+  "scale_relative_tolerance": 0.01,
+  "scale_reduction": "sequence_median_changes_annotation_geometry",
+  "max_scale_surface_displacement_m": 0.0045921224101792965,
+  "fps_provenance": "Assumed 30 fps; not verified by release metadata",
+  "all_fps_verified_by_metadata": false
+}

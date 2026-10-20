@@ -281,6 +281,8 @@ def convert_human_reference(
         source_fps=np.asarray(source_fps, dtype=np.float64),
         timestamps=timestamps,
         rest_offsets=rest_offsets.astype(np.float32),
+        body_model_type=np.array("smplx"),
+        body_dataset=np.array("kimodo"),
     )
     reference_meta = {
         "schema": "unified-hoi-human-reference-v2",

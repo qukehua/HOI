@@ -2,7 +2,7 @@
 import torch
 from torch.nn import functional as F
 
-from .geometry import forward_kinematics, human_in_object_frame, nearest_surface, rotation6d_to_matrix
+from .geometry import human_fk, human_in_object_frame, nearest_surface
 
 
 def masked_mean(value, mask):
@@ -14,7 +14,8 @@ def geometric_losses(states, batch, contact_target=None, contact_mask=None, thre
     human, obj = states["human"], states["object"]
     valid = batch["valid_frames"].bool()
     threshold = torch.as_tensor(batch.get("contact_threshold", threshold), device=human.device).reshape(-1, 1, 1)
-    distance, _ = nearest_surface(human[..., :3], obj, batch["object_points"])
+    fk = human_fk(human, batch["rest_offsets"])
+    distance, _ = nearest_surface(fk, obj, batch["object_points"])
     target = states["contact"].detach().clamp(0, 1) if contact_target is None else contact_target
     cmask = valid[..., None] if contact_mask is None else contact_mask & valid[..., None]
     # InfBaGel-style contact tolerance. Existing point-cloud runs retain zero margin.
@@ -22,15 +23,13 @@ def geometric_losses(states, batch, contact_target=None, contact_mask=None, thre
     margin = mesh.to(human.dtype).reshape(-1, 1, 1) * .02
     contact = masked_mean(F.relu(distance - margin).square(), cmask * target)
     noncontact = masked_mean(F.relu(threshold - distance).square(), cmask * (1 - target))
-    rotations = rotation6d_to_matrix(human[..., 3:])
-    fk = forward_kinematics(rotations, batch["rest_offsets"][:, None], human[:, :, 0, :3])
     kinematic = masked_mean((human[..., :3] - fk).square(), valid[..., None, None])
     # Do not push camera-coordinate data toward a fictitious zero-height ground.
     # A floor penalty is enabled only when a calibrated scene floor is supplied.
     floor_y = torch.as_tensor(batch.get("floor_y", 0.), device=human.device).reshape(-1, 1, 1)
     floor_available = torch.as_tensor(batch.get("floor_available", False), device=human.device).reshape(-1, 1, 1)
-    floor = masked_mean(F.relu(floor_y - human[..., 1]).square(), valid[..., None] & floor_available)
-    local = human_in_object_frame(human[..., :3], obj)
+    floor = masked_mean(F.relu(floor_y - fk[..., 1]).square(), valid[..., None] & floor_available)
+    local = human_in_object_frame(fk, obj)
     if human.shape[1] > 1:
         pair_valid = valid[:, 1:] & valid[:, :-1]
         pair_contact = target[:, 1:] * target[:, :-1]

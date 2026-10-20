@@ -144,6 +144,13 @@ def evaluate_batch(states: Mapping[str, Tensor], controls: ControlBatch,
         "contact_threshold_m": float(tolerance.flatten()[0]) if (tolerance == tolerance.flatten()[0]).all() else None,
         "floor_y_m": float(floor.flatten()[0]) if (floor == floor.flatten()[0]).all() else None,
     }
+    parents = tuple(batch.get("parents", SMPL_PARENTS))
+    if len(parents) < njoints or any(not 0 <= int(parents[i]) < i for i in range(1, njoints)):
+        raise ValueError("parents must provide a topologically ordered skeleton")
+    fk = forward_kinematics(rotation6d_to_matrix(human[..., 3:9]), offsets[:, None], human[..., 0, :3], parents)
+    from .kinematic_projection import kinematic_diagnostics
+    report.update(kinematic_diagnostics(clean, controls, {**batch, "parents": parents}))
+    report["human_geometry"] = "root_rotation_FK"
     error_sum, observed_count = 0.0, 0
     for name in MODALITIES:
         mask = controls.masks[name]
@@ -160,10 +167,11 @@ def evaluate_batch(states: Mapping[str, Tensor], controls: ControlBatch,
         pred, target, mask = clean[name], controls.values[name], controls.masks[name]
         full_xyz = mask[..., :3].all(-1)
         component_mask = mask[..., :3]
-        pos_error = torch.linalg.vector_norm(pred[..., :3] - target[..., :3], dim=-1)
+        decoded_xyz = fk if name == "human" else pred[..., :3]
+        pos_error = torch.linalg.vector_norm(decoded_xyz - target[..., :3], dim=-1)
         report[f"{name}_anchor_position_count"] = _count(full_xyz)
         report[f"{name}_anchor_position_error_m"] = _mean(pos_error, full_xyz)
-        report[f"{name}_anchor_position_component_mae_m"] = _mean((pred[..., :3] - target[..., :3]).abs(), component_mask)
+        report[f"{name}_anchor_position_component_mae_m"] = _mean((decoded_xyz - target[..., :3]).abs(), component_mask)
         full_rot = mask[..., 3:9].all(-1)
         pred_ok, target_ok = _rotation_valid(pred[..., 3:9]), _rotation_valid(target[..., 3:9])
         angle = torch.rad2deg(rotation_angle(rotation6d_to_matrix(pred[..., 3:9]), rotation6d_to_matrix(target[..., 3:9])))
@@ -178,7 +186,10 @@ def evaluate_batch(states: Mapping[str, Tensor], controls: ControlBatch,
     contact_mask = controls.masks["contact"] & valid[..., None]
     positive = contact_mask & (controls.values["contact"] == 1)
     negative = contact_mask & (controls.values["contact"] == 0)
-    distance, _ = nearest_surface(human[..., :3], obj, points)
+    distance, _ = nearest_surface(fk, obj, points)
+    for name, joint in (("left_wrist", 20), ("right_wrist", 21)):
+        if njoints > joint:
+            report[name + "_object_distance_mean_m"] = _mean(distance[..., joint], valid)
     geometrically_close = distance < tolerance
     satisfied = torch.where(positive, geometrically_close, ~geometrically_close)
     report["contact_anchor_count"] = _count(contact_mask)
@@ -201,23 +212,19 @@ def evaluate_batch(states: Mapping[str, Tensor], controls: ControlBatch,
     report["contact_slip_mean_m_s"] = None
     report["contact_slip_pair_count"] = 0
     if times is not None and valid.shape[1] > 1:
-        local = human_in_object_frame(human[..., :3], obj)
+        local = human_in_object_frame(fk, obj)
         velocity, _, pairs = _differentiate(local, times, valid)
         slip_support = positive[:, 1:] & positive[:, :-1] & pairs[..., None]
         report["contact_slip_pair_count"] = _count(slip_support)
         report["contact_slip_mean_m_s"] = _mean(torch.linalg.vector_norm(velocity, dim=-1), slip_support)
 
-    parents = tuple(batch.get("parents", SMPL_PARENTS))
-    if len(parents) < njoints or any(not 0 <= int(parents[i]) < i for i in range(1, njoints)):
-        raise ValueError("parents must provide a topologically ordered skeleton")
-    fk = forward_kinematics(rotation6d_to_matrix(human[..., 3:9]), offsets[:, None], human[..., 0, :3], parents)
     fk_error = torch.linalg.vector_norm(human[..., 1:, :3] - fk[..., 1:, :], dim=-1)
     fk_support = valid[..., None].expand_as(fk_error)
     report["human_fk_nonroot_count"] = _count(fk_support)
     report["human_fk_error_m"] = _mean(fk_error, fk_support)
 
     world_points = object_to_world(points, obj)
-    for name, positions in (("human", human[..., :3]), ("object", world_points)):
+    for name, positions in (("human", fk), ("object", world_points)):
         depth = (floor - positions[..., 1]).clamp_min(0)
         support = valid[..., None].expand_as(depth)
         report[f"{name}_floor_below_rate"] = _mean((depth > 0).float(), support)
@@ -226,7 +233,7 @@ def evaluate_batch(states: Mapping[str, Tensor], controls: ControlBatch,
     timing = batch.get("fps_verified_by_metadata")
     report["timing_verified_by_metadata"] = bool(torch.as_tensor(timing).all()) if timing is not None else None
     report["floor_calibrated"] = bool(torch.as_tensor(batch.get("floor_available", False)).all())
-    report.update(_motion_statistics(human[..., :3], times, valid, "human"))
+    report.update(_motion_statistics(fk, times, valid, "human"))
     report.update(_motion_statistics(obj[..., :3], times, valid, "object"))
     return report
 
@@ -298,7 +305,8 @@ def main(argv: list[str] | None = None) -> None:
             control_source = "empty_no_saved_anchors"
     batch = {
         "object_points": torch.as_tensor(np.asarray(reference["object_points"], dtype=np.float32).copy())[None],
-        "rest_offsets": torch.as_tensor(np.asarray(reference["rest_offsets"], dtype=np.float32).copy())[None],
+        "rest_offsets": torch.as_tensor(np.asarray(prediction.get("rest_offsets", reference["rest_offsets"]),
+                                                  dtype=np.float32).copy())[None],
         "timestamps": torch.from_numpy(stamps.copy())[None],
         "fps": fps,
         "fps_verified_by_metadata": bool(reference.get("fps_verified_by_metadata", False)),
@@ -316,7 +324,7 @@ def main(argv: list[str] | None = None) -> None:
         report["paper_evaluation"] = evaluate_paper_sequence(
             states, controls, reference, assets=assets_from_args(args), start=start, task=args.task,
             text_conditioned=bool(np.asarray(prediction.get("text_conditioned", False)).item()),
-            chamfer_samples=args.chamfer_samples, seed=args.metric_seed)
+            chamfer_samples=args.chamfer_samples, seed=args.metric_seed, prediction_body=prediction)
     report["reference_start_frame"] = start
     report["control_source"] = control_source
     rendered = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False)

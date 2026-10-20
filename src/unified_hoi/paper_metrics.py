@@ -55,10 +55,10 @@ def rotation_matrices(state):
 
 
 def omomo_joints24(human, rest_offsets24):
-    """Decode root/global rotations with subject-specific SMPL-H rest offsets.
+    """Decode root/global rotations with the original OMOMO rest offsets.
 
     OMOMO evaluates the SMPL-decoded skeleton, not its independently predicted
-    xyz channels. Joints 22/23 are middle-finger bases (SMPL-H 28/43), whose
+    xyz channels. Joints 22/23 are the two hand points stored by OMOMO, whose
     positions depend only on wrist transforms and the two supplied offsets.
     """
     human = np.asarray(human, dtype=np.float64)
@@ -206,7 +206,8 @@ class PaperAssets:
             raise ValueError(f"OMOMO raw release does not contain {name}")
         raw = self.raw[name]
         offsets = np.asarray(raw["rest_offsets"], dtype=np.float64)
-        if offsets.shape != (24, 3) or not np.allclose(offsets[:22], record["rest_offsets"], atol=1e-6):
+        original_offsets = record.get("source_rest_offsets", record["rest_offsets"])
+        if offsets.shape != (24, 3) or not np.allclose(offsets[:22], original_offsets, atol=1e-6):
             raise ValueError("raw/canonical skeleton mismatch; cannot guess hand offsets")
         stamps = np.asarray(record["timestamps"])[frame_indices]
         source_times = np.asarray(raw.get("timestamps", np.arange(len(raw["trans"])) / self.omomo_source_fps))
@@ -278,7 +279,7 @@ def infer_task(controls):
 
 
 def evaluate_paper_sequence(states, controls, record, *, assets=None, start=0, task="auto",
-                            text_conditioned=False, chamfer_samples=10000, seed=0):
+                            text_conditioned=False, chamfer_samples=10000, seed=0, prediction_body=None):
     """Evaluate one aligned window. Ground truth is read only after generation."""
     controls.validate()
     if controls.valid_frames.shape[0] != 1:
@@ -331,7 +332,16 @@ def evaluate_paper_sequence(states, controls, record, *, assets=None, start=0, t
         vertices, faces, path = assets.mesh(record)
         report["details"]["mesh_path"] = path
         offsets, scale = assets.omomo_metadata(record, indices)
-        pred, ref = omomo_joints24(pred_human, offsets), omomo_joints24(ref_human, offsets)
+        predicted_offsets = offsets
+        body = record if prediction_body is None else prediction_body
+        if int(body.get("body_geometry_version", 0)) == 1:
+            from .body_geometry import model_offsets24, validate_body_geometry
+            from .smpl_mesh import DEFAULT_MODEL_PATH
+            validate_body_geometry(body, model_path=DEFAULT_MODEL_PATH)
+            predicted_offsets = model_offsets24(body)
+            report["protocol_notes"].append(
+                "Prediction uses the installed SMPL-X asset/original betas; reference retains source 24-joint offsets.")
+        pred, ref = omomo_joints24(pred_human, predicted_offsets), omomo_joints24(ref_human, offsets)
         # The object trajectory is a fixed condition. Using a different predicted
         # object here would evaluate a different task and could conceal violations.
         if not np.allclose(pred_obj, ref_obj, atol=1e-5, rtol=1e-5):
@@ -344,7 +354,8 @@ def evaluate_paper_sequence(states, controls, record, *, assets=None, start=0, t
             distances.append(tree.query(local.reshape(-1, 3))[0].reshape(-1, 2) * scale[:, None])
         report["metrics"], counts = human_metrics(pred, ref, *distances)
         report["details"].update(counts, contact_threshold_m=.05, contact_support="either_middle_finger_base_per_frame",
-                                  joint_decoding="SMPL_H_rest_offsets24_FK", MPJPE_alignment="pelvis_translation_only",
+                                  joint_decoding=("SMPLX_asset_prediction_source_reference_FK" if int(body.get("body_geometry_version", 0)) == 1
+                                                  else "source_rest_offsets24_FK"), MPJPE_alignment="pelvis_translation_only",
                                   HandJPE_alignment="world", c_percent_unit="fraction_0_to_1",
                                   object_scale="original_per_frame_scale")
     elif task == "object-contact-to-human":

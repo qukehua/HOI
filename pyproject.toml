@@ -10,7 +10,7 @@ requires-python = ">=3.10"
 dependencies = ["torch>=2.2", "numpy>=1.24", "scipy>=1.10", "PyYAML>=6", "trimesh>=4", "joblib>=1.3", "tqdm>=4.66"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["ruff>=0.6"]
 body = ["smplx>=0.1.28"]
 text = ["transformers>=4.40", "safetensors>=0.4"]
 swanlab = ["swanlab>=0.6"]
@@ -26,10 +26,6 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "unified_hoi.integrations" = ["licenses/*.txt"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]
 
 [tool.ruff]
 line-length = 110

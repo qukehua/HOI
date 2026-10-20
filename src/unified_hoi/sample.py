@@ -11,6 +11,8 @@ import torch
 from .controls import (ControlBatch, check_anchor_feasibility, compile_controls, describe_mode,
                        parse_mode, sample_controls)
 from .data import load_record
+from .body_metadata import BODY_METADATA_KEYS, body_metadata
+from .body_geometry import BODY_GEOMETRY_KEYS, canonicalize_body
 from .mesh_geometry import attach_mesh_geometry
 from .runtime import device_for, load_model, move_batch, write_json
 
@@ -33,6 +35,8 @@ def prepare_batch(path, frames=None, start=0, text_dim=512, scene_only=False, *,
         record = load_record(path)
         if geometry_encoder == "mesh_bps":
             record = attach_mesh_geometry(record, object_mesh, object_mesh_scale)
+        if "gender" in record and "betas" in record:
+            record = canonicalize_body(record)
         n = min(frames or len(record["human"]), len(record["human"]) - start)
         if start < 0 or n < 1:
             raise ValueError("Requested clip is outside the reference")
@@ -41,6 +45,8 @@ def prepare_batch(path, frames=None, start=0, text_dim=512, scene_only=False, *,
         state = {key: record[key][start:start + n] for key in ("human", "object", "contact")}
     if scene_only and geometry_encoder == "mesh_bps":
         record = attach_mesh_geometry(record, object_mesh, object_mesh_scale)
+    if scene_only and "gender" in record and "betas" in record:
+        record = canonicalize_body(record)
     if geometry_encoder not in {"pointnet", "mesh_bps"}:
         raise ValueError("geometry_encoder must be mesh_bps or pointnet")
     if not np.isfinite(fps) or fps <= 0:
@@ -116,6 +122,8 @@ def main():
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--steps", type=int, default=50)
     parser.add_argument("--projection-steps", type=int, default=0)
+    parser.add_argument("--ik-steps", type=int, default=90,
+                        help="Pose-space iterations for position anchors; FK export is always enabled")
     parser.add_argument("--text-guidance", type=float, default=1.)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="auto")
@@ -157,13 +165,31 @@ def main():
         if abs(fps - float(batch["fps"][0])) > 1e-4:
             raise ValueError("Human-prior FPS does not match scene; resample explicitly first")
         batch["rest_offsets"] = rest_offsets
+        # The prior supplies a different person's skeleton: do not retain the scene/reference betas.
+        with np.load(args.human_prior, allow_pickle=False) as prior:
+            prior_metadata = body_metadata(dict(prior))
+        if not prior_metadata:
+            raise ValueError("Human prior needs body_model_type provenance; reconvert with the current Kimodo bridge")
+        prior_metadata.setdefault("body_dataset", np.array("external"))
+        metadata = {k: v for k, v in metadata.items() if k not in (*BODY_METADATA_KEYS, *BODY_GEOMETRY_KEYS)}
+        metadata.update(prior_metadata)
+        if "gender" in prior_metadata and "betas" in prior_metadata:
+            prior_geometry = canonicalize_body({**prior_metadata, "rest_offsets": rest_offsets[0].numpy()})
+            batch["rest_offsets"] = torch.from_numpy(prior_geometry["rest_offsets"].copy())[None]
+            metadata.update({k: prior_geometry[k] for k in BODY_GEOMETRY_KEYS})
     feasibility = check_anchor_feasibility(controls, batch["object_points"])
     batch, controls = move_batch(batch, device), controls.to(device)
+    projection_diagnostics = {}
     prediction = diffusion.sample(model, batch, controls, args.steps, args.seed,
-                                  args.text_guidance, args.projection_steps)
+                                  args.text_guidance, args.projection_steps, args.ik_steps,
+                                  diagnostics=projection_diagnostics)
     from .evaluate import evaluate_batch
     report = evaluate_batch(prediction, controls, batch)
     arrays = {key: value[0].detach().cpu().numpy() for key, value in prediction.items()}
+    arrays.update(body_metadata(metadata))
+    arrays.update({k: metadata[k] for k in BODY_GEOMETRY_KEYS if k in metadata})
+    arrays["human_position_decoding"] = np.array("root_rotation_FK")
+    arrays["human_before_fk"] = projection_diagnostics["human_before_fk"][0].cpu().numpy()
     arrays.update(object_points=batch["object_points"][0].cpu().numpy(),
                   rest_offsets=batch["rest_offsets"][0].cpu().numpy(),
                   fps=np.float32(batch["fps"][0].cpu()), timestamps=timestamps,
@@ -184,8 +210,11 @@ def main():
     output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(output, **arrays)
     write_json(output.with_suffix(".metrics.json"), {"metrics": report, "anchor_feasibility": feasibility,
+               "before_pose_projection": projection_diagnostics["before_pose_projection"],
                "checkpoint_step": checkpoint["step"], "seed": args.seed, "controls": list(controls.signatures),
                "mode": args.mode, "mode_description": describe_mode(args.mode) if args.mode else None,
+               "body_geometry_version": int(metadata.get("body_geometry_version", 0)),
+               "checkpoint_geometry_objective_version": checkpoint["config"].get("geometry_objective_version", 1),
                "physical_execution_validated": False})
     print(str(output.resolve()))
 

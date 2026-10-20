@@ -60,6 +60,12 @@ def object_to_world(points: Tensor, object_state: Tensor) -> Tensor:
     return torch.einsum("btij,bkj->btki", rot, points) + object_state[..., None, :3]
 
 
+def human_fk(human: Tensor, rest_offsets: Tensor, parents=SMPL_PARENTS) -> Tensor:
+    """Decode [...,T,J,9] using the same root/rotations that drive the body mesh."""
+    return forward_kinematics(rotation6d_to_matrix(human[..., 3:9]),
+                              rest_offsets.unsqueeze(-3), human[..., 0, :3], parents)
+
+
 def human_in_object_frame(human_positions: Tensor, object_state: Tensor) -> Tensor:
     rot = rotation6d_to_matrix(object_state[..., 3:9])
     return torch.einsum("btij,btnj->btni", rot.transpose(-1, -2),

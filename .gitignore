@@ -11,5 +11,4 @@ __pycache__/
 .ruff_cache/
 dist/
 build/
-/tests/
 /OMOMO.rar

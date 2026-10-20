@@ -11,7 +11,7 @@ import math
 import torch
 from torch import nn
 
-from .geometry import human_in_object_frame, nearest_surface
+from .geometry import human_fk, human_in_object_frame, nearest_surface
 from .normalization import StateNormalizer
 from .mesh_geometry import BPS_COUNT, GEOMETRY_VERSION
 from .integrations._tridi_primitives import Projection, get_timestep_embedding
@@ -29,6 +29,12 @@ class ModelConfig:
     two_stage: bool = True
     # Legacy default preserves checkpoints; production YAML explicitly uses mesh_bps.
     geometry_encoder: str = "pointnet"
+    # Preserve old checkpoint forward semantics; new training selects FK.
+    relation_geometry: str = "xyz"
+
+    def __post_init__(self):
+        if self.relation_geometry not in {"xyz", "fk"}:
+            raise ValueError("relation_geometry must be xyz or fk")
 
     def asdict(self):
         return asdict(self)
@@ -140,8 +146,10 @@ class UnifiedHOIDenoiser(nn.Module):
             h, o, c = h + stage, o + stage, c + stage
         if self.config.relations:
             physical = self.normalizer.decode(x)
-            local = human_in_object_frame(physical["human"][..., :3], physical["object"])
-            distance, near = nearest_surface(physical["human"][..., :3], physical["object"], batch["object_points"])
+            human_xyz = (human_fk(physical["human"], batch["rest_offsets"])
+                         if self.config.relation_geometry == "fk" else physical["human"][..., :3])
+            local = human_in_object_frame(human_xyz, physical["object"])
+            distance, near = nearest_surface(human_xyz, physical["object"], batch["object_points"])
             relation = torch.cat((local, near - local, distance[..., None],
                                   physical["contact"][..., None],
                                   m["human"][..., :3].any(-1, keepdim=True).to(local),

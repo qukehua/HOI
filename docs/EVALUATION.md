@@ -1,5 +1,9 @@
 # Uni-HOI evaluation protocol
 
+当前 `parametric_v1` 检查点在BEHAVE和OMOMO上都使用73关节/690表面点的TriDi式重建指标，见 [原生参数重训与评估](PARAMETRIC_RETRAINING.md)。BEHAVE用SMPL-H，OMOMO用SMPL-X语义映射；接触概率由各自128维latent解码。以下旧版profile说明只适用于22关节检查点。新路径未实现论文的generation分布指标，也不能把窗口评估直接当作论文完整复现。
+
+---
+
 The default benchmark profile is per dataset. BEHAVE uses `tridi`
 (OBJ_V2V / OBJ_CENTER / contact reconstruction plus generation metrics on mode
 `011`). Other datasets, including OMOMO, use `uni-hoi`, following

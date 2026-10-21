@@ -118,6 +118,9 @@ def finish_swanlab(run):
 
 
 def run_training(config, resume=None):
+    if config.get("representation") == "parametric_v1":
+        from .parametric.train import run_training as train_parametric
+        return train_parametric(config, resume)
     config = deepcopy(config)
     # FK now drives every geometric objective. Old checkpoints must not silently
     # resume with changed loss/data/normalization semantics.

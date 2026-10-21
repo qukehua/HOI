@@ -1,5 +1,9 @@
 # 人体网格解码与位置一致性
 
+原生参数预测可直接运行 `python -m unified_hoi.smpl_mesh --input PRED.npz --output MESH.npz`，按记录的SMPL-H/SMPL-X模型与手指参数完整解码。标准axis-angle参数也保存在采样NPZ中，见 [重训说明](PARAMETRIC_RETRAINING.md)。下面的22关节/FK/中性手说明仅适用于旧模型。
+
+---
+
 ## 当前解码设置
 
 模型继续输出 `[T,22,9]`：22 个身体关节的位置和全局旋转矩阵前两行。

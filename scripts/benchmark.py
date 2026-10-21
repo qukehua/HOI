@@ -54,6 +54,7 @@ def main(argv=None):
     parser.add_argument("--output", required=True)
     parser.add_argument("--profile", choices=("auto", "tridi", "uni-hoi", "diagnostics"), default="auto",
                         help="auto (default): BEHAVE uses tridi, other datasets use uni-hoi. "
+                             "Native parametric checkpoints: both datasets use 73-joint/surface reconstruction metrics. "
                              "tridi: Reconstruction (OBJ_*/MPJPE/contacts) + Generation "
                              "(1-NNA/COV/MMD/SD). uni-hoi: paper task metrics. diagnostics: controls only.")
     parser.add_argument("--modes", nargs="+", type=parse_mode,
@@ -76,6 +77,17 @@ def main(argv=None):
     parser.add_argument("--device", default="auto")
     add_asset_arguments(parser)
     args = parser.parse_args(argv)
+    checkpoint_config = torch.load(args.checkpoint, map_location="cpu", weights_only=False).get("config", {})
+    if checkpoint_config.get("representation") == "parametric_v1":
+        from unified_hoi.parametric.evaluate import benchmark as native_benchmark
+        if args.profile not in ("auto", "tridi") or args.projection_steps or args.samples_per_window != 1 or args.observed_signatures:
+            raise ValueError("Native benchmark uses isolated surface metrics, one sample and full H/O/C modes; "
+                             "legacy projection/profile/signature options are unsupported")
+        torch.set_num_threads(4)
+        return native_benchmark(args.checkpoint, args.manifest, args.output, modes=args.modes or ("010", "100"),
+                                window=args.window, steps=args.steps, seed=args.seed, device=device_for(args.device),
+                                limit=args.limit, text_conditioned=args.text_conditioned,
+                                save_predictions=args.save_predictions)
     if (args.limit is not None and args.limit < 1) or args.samples_per_window < 1 or args.chamfer_samples < 1:
         raise ValueError("limit, samples-per-window and chamfer-samples must be positive")
     if args.profile == "uni-hoi" and args.modes and "111" in args.modes and not args.text_conditioned:

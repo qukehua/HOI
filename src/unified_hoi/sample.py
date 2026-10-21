@@ -105,6 +105,7 @@ def add_human_prior(controls, path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", required=True, help="Trusted project checkpoint")
+    parser.add_argument("--manifest", help="Required native-parametric manifest for new checkpoints")
     inputs = parser.add_mutually_exclusive_group(required=True)
     inputs.add_argument("--reference", help="Canonical record used as scene and optional explicit observed values")
     inputs.add_argument("--scene", help="NPZ with only object_points, rest_offsets, fps; no target motion required")
@@ -118,6 +119,7 @@ def main():
                         help="Recorded object_mesh_scale from the mesh manifest; OMOMO requires its sequence scale")
     parser.add_argument("--human-prior", help="Canonical human reference produced by Kimodo bridge")
     parser.add_argument("--text-features", help="Optional actual cached text embedding .npy")
+    parser.add_argument("--text-conditioned", action="store_true", help="Native checkpoints: use manifest text features")
     parser.add_argument("--frames", type=int)
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--steps", type=int, default=50)
@@ -129,6 +131,19 @@ def main():
     parser.add_argument("--device", default="auto")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
+    checkpoint_config = torch.load(args.checkpoint, map_location="cpu", weights_only=False).get("config", {})
+    if checkpoint_config.get("representation") == "parametric_v1":
+        from .parametric.sample import sample as native_sample
+        if not args.manifest or not args.reference or not args.mode or args.controls or args.human_prior or args.projection_steps:
+            raise ValueError("Native sampling requires --manifest --reference --mode; legacy controls/IK projection "
+                             "are not interchangeable with parameter/latent masks")
+        if args.text_features or args.object_mesh or args.text_guidance != 1.:
+            raise ValueError("Native sampling reads cached text and object geometry from its manifest")
+        torch.set_num_threads(4)
+        print(native_sample(args.checkpoint, args.manifest, args.reference, args.output, args.mode,
+                            frames=args.frames or 120, start=args.start, steps=args.steps, seed=args.seed,
+                            device=device_for(args.device), text_conditioned=args.text_conditioned))
+        return
     torch.set_num_threads(4)
     output = Path(args.output)
     if output.suffix != ".npz":

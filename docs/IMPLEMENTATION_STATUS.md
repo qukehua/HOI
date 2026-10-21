@@ -1,5 +1,11 @@
 # 本次交付与验证状态
 
+2026-10-21数据清理：按用户明确选择，`data/` 仅保留当前parametric模型训练、采样和评估的文件；旧body-FK中间数据、原始BEHAVE、原始文本标注和旧准备记录已删除。当前目录清单见 [data/README.md](../data/README.md)，实际统计与完整性检查见 [清理记录](data_cleanup_20261021.json)。下文的原始数据路径和旧转换材料只属于历史记录。
+
+2026-10-21新增原生参数重训路径，当前默认配置已切换为 `parametric_v1`。两套数据隔离、73关节评估、690表面接触与128维AE、完整网格导出、旧输出适配均见 [原生参数重训说明](PARAMETRIC_RETRAINING.md)。本次验证结果保存于 `runs/verification/native_20261021/`；正式HOI训练由用户在服务器启动。以下清理记录、22关节表示及原有实验状态为历史内容。
+
+---
+
 交付目录：`D:/code/HOI`。用户原有 `OMOMO/` 保留。本机 `.venv/` 和 `requirements-tested.txt` 仅用于 CPU 程序检查；正式训练在 Linux 服务器另建 CUDA 环境，见 README。本次没有获得或训练好正式 HOI 模型。
 
 2026-10-16 按用户要求将测试源码、专用 smoke 工具、历史测试权重与输出列入清理清单。下文测试数量和数值为历史开发记录；实际清理执行状态见 `docs/project_cleanup_report.json`，状态为 `blocked_by_execution_policy` 时文件仍保留。原始数据、完整处理数据、模型和运行代码保留。

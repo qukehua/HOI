@@ -185,6 +185,18 @@ def skeleton_to_smpl(human, rest_offsets, gender, model_path=DEFAULT_MODEL_PATH,
 
 def record_to_smpl(record, model_path=DEFAULT_MODEL_PATH):
     """Decode a processed/prediction archive using its saved body provenance."""
+    if str(record.get("representation")) == "parametric_v1":
+        from .parametric.body import decode_full, digest_file
+        from .body_metadata import DATASET_MODELS
+        dataset, gender = str(record["dataset"]), str(record["gender"])
+        model_type = DATASET_MODELS[dataset]
+        if (str(record["body_model_type"]) != model_type or
+                digest_file(model_asset_path(model_path, gender, model_type=model_type)) != str(record["body_model_sha256"])):
+            raise ValueError("Native mesh export requires the recorded body assets")
+        vertices, faces, _ = decode_full(record["human_params"], dataset, gender, model_path)
+        layer = _layer(model_path, gender, model_type=model_type)
+        weights = body_skinning_weights(layer.lbs_weights.numpy(), layer.parents.numpy())
+        return vertices, faces, weights.argmax(1)
     metadata = body_metadata(record)
     if "body_geometry_version" in record:
         from .body_geometry import validate_body_geometry
@@ -208,8 +220,10 @@ def main():
         record = dict(archive)
     vertices, faces, dominant = record_to_smpl(record, args.models)
     args.output.parent.mkdir(parents=True, exist_ok=True)
+    metadata = ({k: record[k] for k in ("dataset", "gender", "body_model_type", "body_model_sha256", "representation")}
+                if str(record.get("representation")) == "parametric_v1" else body_metadata(record))
     np.savez_compressed(args.output, vertices=vertices, faces=faces, dominant=dominant,
-                        **body_metadata(record), **{k: record[k] for k in ("fps", "timestamps") if k in record})
+                        **metadata, **{k: record[k] for k in ("fps", "timestamps") if k in record})
     print(args.output.resolve())
 
 

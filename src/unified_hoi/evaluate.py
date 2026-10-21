@@ -242,6 +242,8 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prediction", required=True, type=Path)
     parser.add_argument("--reference", required=True, type=Path)
+    parser.add_argument("--checkpoint", type=Path, help="Native prediction: checkpoint containing its contact decoder")
+    parser.add_argument("--manifest", type=Path, help="Native prediction: isolated dataset manifest")
     parser.add_argument("--controls", type=Path,
                         help="Optional override; default is the exact anchors/masks stored in the prediction")
     parser.add_argument("--reference-start", type=int, default=0)
@@ -252,9 +254,18 @@ def main(argv: list[str] | None = None) -> None:
     add_asset_arguments(parser)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
-    reference = load_record(args.reference)
     with np.load(args.prediction, allow_pickle=False) as archive:
         prediction = {key: archive[key] for key in archive.files}
+    if str(prediction.get("representation")) == "parametric_v1":
+        from .parametric.evaluate import evaluate_prediction
+        if not args.checkpoint or not args.manifest or args.controls:
+            raise ValueError("Native evaluation requires --checkpoint --manifest and saved full-modality controls")
+        torch.set_num_threads(4)
+        report = evaluate_prediction(args.prediction, args.checkpoint, args.reference, args.manifest,
+                                     args.output, start=args.reference_start if args.reference_start else None)
+        print(json.dumps(report, ensure_ascii=False))
+        return
+    reference = load_record(args.reference)
     for name in (*MODALITIES, "fps", "timestamps"):
         if name not in prediction:
             raise ValueError(f"prediction archive is missing {name}")

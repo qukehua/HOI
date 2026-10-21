@@ -1,7 +1,11 @@
-manifest: data/processed/omomo_with_body_fk.jsonl
-output: runs/unified_body_fk
-body_geometry_version: 1
-geometry_objective_version: 2
+# Default selects OMOMO only. BEHAVE uses train_behave.yaml; never concatenate these manifests.
+representation: parametric_v1
+dataset: omomo
+manifest: data/processed/omomo_parametric.jsonl
+output: runs/omomo_parametric_default
+contact_support: data/parametric_assets/omomo/contact_support.npz
+contact_codec: data/parametric_assets/omomo/contact_ae/best.pt
+body_models: data/smplx_models
 seed: 42
 device: auto
 cpu_threads: 4
@@ -9,39 +13,42 @@ workers: 0
 window: 120
 stride: 60
 batch_size: 8
-balance_datasets: true
-max_steps: 100000
+balance_datasets: false
+max_steps: 500000
 learning_rate: 0.0001
 weight_decay: 0.01
 gradient_clip: 1.0
 ema_decay: 0.999
 diffusion_steps: 1000
-geometry_weight: 0.05
-losses:
-  denoise_human: true
-  denoise_object: true
-  denoise_contact: true
-  contact: true
-  noncontact: true
-  fk: true
-  floor: false
-  slip: true
+geometry_weight: 1.0
+geometry_max_t: 250
+geometry_frames: 16
+geometry_losses:
+  object_v2v: 10.0
+  body_v2v: 1.0
+  surface_distance: 5.0
+text_condition: true
 text_dropout: 0.1
 log_every: 20
 save_every: 1000
 validate_every: 1000
-validation_batches: 20
-save_best: true
-progress: true
+validation_batches: 8
+validation_steps: 50
+best_mode: '010'
 use_swanlab: true
 swanlab_project: HOI
-swanlab_run_name: null
-swanlab_workspace: null
+swanlab_run_name: omomo_parametric
 swanlab_mode: online
-holdout_signatures: []
+allowed_patterns:
+- '100'
+- '010'
+- '001'
+- '110'
+- '101'
+- '011'
+- '111'
 model:
-  relation_geometry: fk
-  geometry_encoder: mesh_bps
+  dataset: omomo
   width: 192
   heads: 6
   layers: 4

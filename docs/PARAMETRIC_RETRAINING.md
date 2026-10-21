@@ -1,0 +1,157 @@
+# 原生人体参数、128维接触与隔离重训
+
+当前在 `D:/code/HOI` 使用原生人体参数与接触latent模型，从头训练。`data/` 已清理为当前模型依赖，目录用途见 [data/README.md](../data/README.md)。旧预处理数据、原始BEHAVE和原始文本标注已按用户明确选择删除。正式HOI训练由用户在GPU服务器启动。本机的两步训练只验证程序，不代表模型质量。
+
+## 输出与评估
+
+| 项目 | BEHAVE | OMOMO |
+| --- | --- | --- |
+| 原生模型 | SMPL-H，10 betas | SMPL-X，16 betas |
+| H维度 | 325 | 331 |
+| 局部姿态 | 根+21身体+左右各15手指关节，52×6D | 同52个身体/手关节，SMPL-X额外下颌/眼球与表情固定中性 |
+| 平移 | 原生SMPL transl，3维 | 原生SMPL transl，3维 |
+| O | 刚体原点平移3+旋转6D | 同左，保留序列物体尺度 |
+| C | 128维连续latent | 独立的128维连续latent |
+| 接触解码 | 本数据集AE → 690个概率 | 本数据集AE → 690个概率 |
+| 评估关节 | SMPL-H原生73关节 | body22+hand30+vertex landmarks21，共73个同语义关节 |
+| 接触点 | TriDi官方690个SMPL-H顶点索引 | 原生SMPL-X上独立选择690个点，不复用SMPL-H索引 |
+
+H的顺序是 `[betas, local_rot6d[52], transl]`，旋转6D存矩阵前两**行**。OMOMO的SMPL-X 127输出中，选择 `0:22`、`25:55`、`55:76`；这不是简单取前73个。SMPL-H的6890顶点与SMPL-X的10475顶点不会互相套索引。
+
+采样NPZ同时保存 `global_orient[T,3]`、`body_pose[T,63]`、`left_hand_pose[T,45]`、`right_hand_pose[T,45]`、`betas[T,N]`、`transl[T,3]`，均为标准axis-angle姿态参数；使用 `use_pca=False, flat_hand_mean=True` 解码。另有 `human_params`、`local_pose6d`、`joints73`、`contact_latent`、`contact_probability`、`contact_vertices`、条件mask、时间戳和资产校验信息。OMOMO还保存中性的表情/下颌/眼球参数。
+
+当前源数据的限制：逐一检查BEHAVE的299份原始SMPL-H拟合，手指轴角在序列内及跨序列均是同一固定值，转换保留该值。OMOMO发布数据没有手指姿态，使用中性手姿并在扩散中作为固定约定。**现有数据不能监督真实动态手指运动**；增加输出维度不能补出不存在的标注。未来若数据含动态手指，BEHAVE转换器会拒绝丢弃它们，需接入按时间戳读取的完整标注。
+
+## 网络和训练改动
+
+`src/unified_hoi/parametric/` 是新实现；旧body-FK代码保留作参考，其数据已清理。默认仍为width192、4个时空分解block和粗阶段，BEHAVE可训练参数7,380,420，另有冻结AE参数1,036,594。每帧52姿态token、shape、transl、object、contact共56个token。没有用“单纯加深网络”混淆这次输出及评估修正。
+
+物体条件沿用网格1024点BPS。关系分支从当前带噪的局部姿态和betas执行FK，得到22个身体关节与物体的关系，按物体噪声程度门控，并使用物体query聚合。**关系分支的22关节不是最终评估关节数**。生成人体时不从GT骨架或GT betas补入形状。
+
+独立H/O/C时间步；未知模态生成，已知模态逐步原样回填。新增局部姿态、betas、平移和128维接触latent的去噪目标；观察项系数0.05保留在分子，不被分母抵消。低噪声阶段使用可微原生LBS的690个表面顶点计算身体误差，并计算物体对应点误差及预测/GT表面距离误差。训练物体距离使用512个固定网格顶点近似，**最终评估使用完整物体网格顶点**。距离均为顶点最近距离，不是三角面有符号距离或穿透量。
+
+训练只用train拟合归一化与AE。AE结构是690→512→256→128→256→512→690，与TriDi的层尺寸一致；使用加权BCE，独立训练3000步，val选检查点和概率阈值。官方接触权重下载服务在本次访问返回503，因此这里没有加载官方权重，也不声称两个latent空间相同。两套AE训练得到不同坐标系，严禁互换。
+
+验证在val中均匀抽取固定窗口，默认8个、DDIM50步：
+
+- `best_010.pt`：按mode010的OBJ_V2V选择。
+- `best_100.pt`：按mode100的MPJPE选择。
+- `best.pt`：由 `best_mode` 指定，默认010。
+- `last.pt`：含模型、EMA、优化器、RNG、epoch和batch位置，用于续训。
+
+如果论文实验要求同一个检查点覆盖全部模式，预先固定 `best_mode` 并对全部模式使用同一 `best.pt`；不能根据test结果挑选检查点。更稳健的实验可在开始前增大 `validation_batches`，固定采样步数和验证预算。
+
+新路径当前支持七种完整H/O/C模式；旧XYZ关键帧IK、任意关节分量控制、稀疏接触mask和接触投影没有直接移植到latent。相关不兼容CLI选项会报错。旧路径及配置位于 `configs/legacy_body_fk/`。
+
+## 服务器需要的文件
+
+在服务器项目根目录建立CUDA环境并安装 `pip install -e '.[body,swanlab]'`；PyTorch的CUDA版本按服务器驱动选择。不要复制Windows `.venv`。下列数据和权重被Git忽略，必须另外迁移：
+
+| 文件/目录 | 用途 |
+| --- | --- |
+| `data/processed/behave_parametric.jsonl` 与 `behave_parametric/` | BEHAVE原生训练数据 |
+| `data/processed/omomo_parametric.jsonl` 与 `omomo_parametric/` | OMOMO原生训练数据 |
+| `data/processed/object_meshes/` | 清单引用的物体网格 |
+| `data/processed/text_features/` | 清单引用的真实CLIP文本缓存 |
+| `data/parametric_assets/behave/` | contact_support.npz与contact_ae/best.pt |
+| `data/parametric_assets/omomo/` | 独立的同类资产 |
+| `data/smplx_models/smplh/`、`data/smplx_models/smplx/` | 已授权的原生男女模型 |
+
+本机新清单中的数据、网格、文本路径均相对清单目录，保持目录结构即可。`source_path`是来源说明，不用于训练加载。SMPL系数不打包进HOI检查点，恢复/采样仍需相同模型文件。数据、接触点和检查点均检查dataset与SHA256；混用会报错。
+
+当前原生训练数据和AE已经准备完成，迁移整个 `data/` 即可，无需再次转换。旧 `*_with_body_fk` 中间数据、原始BEHAVE及标注已删除；若将来需要从原始材料重建，必须重新取得源数据并运行原始预处理流水线，不能仅凭现在的训练文件重新生成所有旧文件。
+
+```bash
+# 验证已有清单与codec；当前数据已全部准备好。
+python scripts/prepare_parametric.py --dataset behave
+python scripts/prepare_parametric.py --dataset omomo
+
+# 独立正式训练；默认分别200k和500k步，CUDA:0。
+python -m unified_hoi.train --config configs/train_behave.yaml
+python -m unified_hoi.train --config configs/train_omomo.yaml
+
+# 续训必须使用同一数据、网络和训练语义；可以增加max_steps。
+python -m unified_hoi.train --config configs/train_behave.yaml \
+  --resume runs/behave_parametric_seed42/last.pt
+```
+
+可加 `--no-swanlab` 关闭日志服务。新实验使用新的 `--output`。旧22关节检查点不能作为新模型 `--resume` 的输入。
+
+## 两套数据使用相同重建指标
+
+模式位依次是H/O/C，1生成、0条件：010生成物体、100生成人体；011/101还生成接触。
+
+- `MPJPE`：原生解码73关节，分别以骨盆对齐后的平均欧氏距离，米。
+- `MPJPE_PA`：再做旋转/平移/尺度Procrustes对齐，米。
+- `OBJ_V2V`：完整刚体模板对应顶点平均距离，米。
+- `OBJ_CENTER`：完整模板顶点几何中心的距离，米。
+- `OBJ_CONTACT_MESHES` / `SBJ_CONTACT_MESHES`：690身体表面点到完整物体顶点集，≤5cm为接触，预测和GT标签一致率，百分数。
+- `*_CONTACT_DIFFUSED`：C生成时通过冻结AE解码并阈值化后与GT表面接触比较；C已知时沿用实际GT接触，符合TriDi条件评估语义。
+
+额外报告precision/recall/F1，避免大量非接触点使准确率显得很高。`CONTACT_MESHES`必须来自生成的人/物几何，不能用接触解码器输出冒充。`CONTACT_DIFFUSED`才评估latent恢复的接触。
+
+```bash
+python scripts/benchmark.py \
+  --checkpoint runs/behave_parametric_seed42/best.pt \
+  --manifest data/processed/behave_parametric.jsonl \
+  --profile tridi --modes 010 100 --window 120 --steps 50 \
+  --device cuda:0 --save-predictions --output runs/eval_behave_parametric
+
+python scripts/benchmark.py \
+  --checkpoint runs/omomo_parametric_seed42/best.pt \
+  --manifest data/processed/omomo_parametric.jsonl \
+  --profile tridi --modes 010 100 --window 120 --steps 50 \
+  --device cuda:0 --save-predictions --output runs/eval_omomo_parametric
+```
+
+上述是单样本、无文本条件的010/100；需要文本时显式加 `--text-conditioned`，缺失缓存会报错。生成接触用 `--modes 011 101`，保持其他设置一致。评估结果分逐窗口JSONL、按窗口平均和按帧加权平均；与原TriDi逐帧平均比较时使用 `frame_weighted_mean`。
+
+**这些命令对齐的是重建指标公式和输出语义，不是完整论文表格复现。** 当前仍采用本项目的10fps、片段划分、窗口、过滤过的刚体对象和独立训练的接触AE；OMOMO原始fps假设仍保留旧流水线限制。新路径尚未接入1-NNA/COV/MMD/SD等generation分布指标。报告中 `directly_comparable_to_paper_table=false`，在统一split、帧选择、采样预算及模型选择协议前，不直接对原论文数字宣称领先。
+
+## 单条采样、重新评估和完整网格
+
+将 `REF.npz` 替换为对应原生清单中的实际文件路径；两套数据使用各自检查点/清单。
+
+```bash
+python -m unified_hoi.sample \
+  --checkpoint runs/behave_parametric_seed42/best.pt \
+  --manifest data/processed/behave_parametric.jsonl --reference REF.npz \
+  --mode 101 --frames 120 --steps 50 --device cuda:0 --output runs/sample_native.npz
+
+python -m unified_hoi.evaluate \
+  --prediction runs/sample_native.npz --reference REF.npz \
+  --checkpoint runs/behave_parametric_seed42/best.pt \
+  --manifest data/processed/behave_parametric.jsonl --output runs/sample_native_metrics.json
+
+python -m unified_hoi.smpl_mesh \
+  --input runs/sample_native.npz --output runs/sample_native_mesh.npz
+```
+
+复评检查保存的mode、窗口、时间戳、身体资产、接触support/codec和已知条件是否一致，不自动对齐错误帧。完整网格输出BEHAVE6890或OMOMO10475顶点。
+
+## 本机验证与复现
+
+```bash
+python -m unittest discover -s tests -v
+python scripts/verify_parametric.py --dataset behave --output runs/verify_native_behave
+python scripts/verify_parametric.py --dataset omomo --output runs/verify_native_omomo
+python scripts/verify_parametric.py --resume-test --output runs/verify_native_resume
+```
+
+集成验证使用完整默认网络宽度/深度、每split一个源片段、8帧窗口、2个训练更新和2个采样步，检查010/100/001、保存后复评、完整网格解码及跨数据集拒绝。断点恢复使用缩小网络验证逐位一致性。回归检查还覆盖两套男女原生LBS精确性、梯度、七模式条件保留与生成目标不泄漏。
+
+此前验证证据位于 `runs/verification/native_20261021/`。data中的旧转换/AE报告已清理，AE的数据集、点集校验值、选中步数、阈值和验证F1仍保存在 `contact_ae/best.pt` 元信息中。最新清理统计见 `docs/data_cleanup_20261021.json`。这些结果只证明已实施流程并能运行，模型效果需要服务器正式训练后判断。
+
+以下为2026-10-21清理前已完成的实测结果；旧数据删除不影响保留的原生训练数据和AE：
+
+| 检查 | BEHAVE | OMOMO |
+| --- | --- | --- |
+| 原生数据 | 1454条 / 114039帧 | 4736条 / 291801帧 |
+| AE train / val帧数 | 77088 / 5902 | 236391 / 26865 |
+| AE验证集重建F1 | 0.851381 | 0.921246 |
+| AE验证选择步数 / 阈值 | 2750 / 0.75 | 3000 / 0.75 |
+| 默认网络两步训练、010/100/001采样及复评 | 通过 | 通过 |
+| 完整网格导出验证 | 8×6890×3 | 8×10475×3 |
+| 旧GT输出适配后的73关节MPJPE | 0米 | 0米 |
+
+13项回归检查通过。连续两步与一步后断点续训的模型和EMA逐位相同（最大差异0）。全部6190条新记录通过维度、旋转、时间戳、手约定和引用文件检查；这次训练改造未修改原始数据；随后用户明确要求删除data中的原始BEHAVE和标注，相关清理单独记录。AE的F1是**GT接触编码再解码的重建质量**，不是从噪声生成HOI的成绩。

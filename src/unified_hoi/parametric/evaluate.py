@@ -10,11 +10,22 @@ from torch.utils.data import DataLoader
 
 from ..data import read_manifest
 from ..mesh_geometry import load_mesh_asset
-from ..paper_metrics import rotation_matrices
+from ..geometry import rotation6d_to_matrix
 from ..runtime import move_batch, write_json
 from .body import BodyGeometry, legacy_to_parameters, human_dim
 from .data import ParametricDataset, load_record
 from .diffusion import controls_for
+
+
+def rotation_matrices(state):
+    """Reject degenerate encodings instead of silently using the model's fallback."""
+    state = np.asarray(state, dtype=np.float64)
+    if state.shape[-1] != 9 or not np.isfinite(state).all():
+        raise ValueError("pose states must be finite [...,9]")
+    a, b = state[..., 3:6], state[..., 6:9]
+    if (np.linalg.norm(a, axis=-1) < 1e-7).any() or (np.linalg.norm(np.cross(a, b), axis=-1) < 1e-7).any():
+        raise ValueError("paper geometry metrics require nondegenerate rotations")
+    return rotation6d_to_matrix(torch.from_numpy(state[..., 3:])).numpy()
 
 
 def similarity(source, target):

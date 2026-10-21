@@ -5,7 +5,6 @@ SMPL transl. SMPL-X jaw/eyes/expression are explicitly neutral, not supervised.
 The 73 evaluation joints share SMPL-H semantics: 52 articulation joints and
 the 21 vertex-selector landmarks. SMPL-X face-only joints are excluded.
 """
-from pathlib import Path
 import hashlib
 
 import numpy as np
@@ -53,36 +52,6 @@ def canonical_joint_indices(dataset):
     return list(range(52)) if dataset == "behave" else list(range(22)) + list(range(25, 55))
 
 
-def make_support(dataset, output, models=DEFAULT_MODEL_PATH):
-    """SMPL-H official 690 indices; SMPL-X native deterministic 690-point FPS."""
-    output = Path(output)
-    model = _layer(models, "male", model_type=DATASET_MODELS[dataset])
-    if dataset == "behave":
-        source = Path(__file__).resolve().parents[3] / "external/tridi/assets/smpl_template_decimated_idxs.npy"
-        indices = np.load(source, allow_pickle=False).astype(np.int64)
-        method = "TriDi official smpl_template_decimated_idxs"
-    else:
-        vertices = model.v_template.numpy().astype(np.float64)
-        indices = np.empty(690, np.int64)
-        # Include the semantic fingertip/foot/face landmarks, then maximize coverage.
-        seeds = model.vertex_joint_selector.extra_joints_idxs.numpy().tolist()
-        distances = np.full(len(vertices), np.inf)
-        for i in range(690):
-            index = seeds[i] if i < len(seeds) else int(distances.argmax())
-            indices[i] = index
-            distances = np.minimum(distances, ((vertices - vertices[index]) ** 2).sum(-1))
-            distances[indices[:i + 1]] = -1
-        method = "native_smplx_landmark_seeded_farthest_point_690_v1"
-    if len(indices) != 690 or len(np.unique(indices)) != 690:
-        raise ValueError("Contact support must contain 690 distinct native vertex indices")
-    if output.exists():
-        with np.load(output, allow_pickle=False) as old:
-            if str(old["dataset"]) != dataset or not np.array_equal(old["indices"], indices):
-                raise ValueError("Existing contact support differs")
-        return
-    output.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(output, indices=indices, dataset=dataset, method=method,
-                        body_model_type=DATASET_MODELS[dataset], version=np.int32(1))
 
 
 class SelectedBody(nn.Module):

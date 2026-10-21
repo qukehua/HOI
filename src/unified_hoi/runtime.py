@@ -8,8 +8,6 @@ import random
 import numpy as np
 import torch
 
-from .diffusion import HOIDiffusion
-from .model import ModelConfig, UnifiedHOIDenoiser
 
 
 def seed_everything(seed):
@@ -50,15 +48,6 @@ def save_checkpoint(path, payload):
     temporary.replace(path)
 
 
-def load_model(path, device="cpu", ema=True):
-    # Checkpoints contain optimizer/RNG Python state. Load only files you trust.
-    checkpoint = torch.load(path, map_location="cpu", weights_only=False)
-    if checkpoint["config"].get("representation") == "parametric_v1":
-        raise ValueError("Native checkpoints require unified_hoi.parametric.train.load_run; "
-                         "the CLI sample and benchmark commands dispatch automatically")
-    model = UnifiedHOIDenoiser(ModelConfig(**checkpoint["config"]["model"]))
-    model.load_state_dict(checkpoint["ema"] if ema and checkpoint.get("ema") else checkpoint["model"])
-    return model.to(device).eval(), HOIDiffusion(checkpoint["config"].get("diffusion_steps", 1000)), checkpoint
 
 
 def write_json(path, data):

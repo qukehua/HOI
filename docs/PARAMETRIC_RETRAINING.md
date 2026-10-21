@@ -24,7 +24,7 @@ H的顺序是 `[betas, local_rot6d[52], transl]`，旋转6D存矩阵前两**行*
 
 ## 网络和训练改动
 
-`src/unified_hoi/parametric/` 是新实现；旧body-FK代码保留作参考，其数据已清理。默认仍为width192、4个时空分解block和粗阶段，BEHAVE可训练参数7,380,420，另有冻结AE参数1,036,594。每帧52姿态token、shape、transl、object、contact共56个token。没有用“单纯加深网络”混淆这次输出及评估修正。
+`src/unified_hoi/parametric/` 是当前实现；公共入口仅调用这一路径，旧body-FK实现和配置列入清理清单。默认仍为width192、4个时空分解block和粗阶段，BEHAVE可训练参数7,380,420，另有冻结AE参数1,036,594。每帧52姿态token、shape、transl、object、contact共56个token。没有用“单纯加深网络”混淆这次输出及评估修正。
 
 物体条件沿用网格1024点BPS。关系分支从当前带噪的局部姿态和betas执行FK，得到22个身体关节与物体的关系，按物体噪声程度门控，并使用物体query聚合。**关系分支的22关节不是最终评估关节数**。生成人体时不从GT骨架或GT betas补入形状。
 
@@ -41,7 +41,7 @@ H的顺序是 `[betas, local_rot6d[52], transl]`，旋转6D存矩阵前两**行*
 
 如果论文实验要求同一个检查点覆盖全部模式，预先固定 `best_mode` 并对全部模式使用同一 `best.pt`；不能根据test结果挑选检查点。更稳健的实验可在开始前增大 `validation_batches`，固定采样步数和验证预算。
 
-新路径当前支持七种完整H/O/C模式；旧XYZ关键帧IK、任意关节分量控制、稀疏接触mask和接触投影没有直接移植到latent。相关不兼容CLI选项会报错。旧路径及配置位于 `configs/legacy_body_fk/`。
+当前支持七种完整H/O/C模式；旧XYZ关键帧IK、任意关节分量控制、稀疏接触mask和接触投影没有移植到latent。公开CLI已移除这些旧选项，传入会报错。
 
 ## 服务器需要的文件
 
@@ -59,7 +59,7 @@ H的顺序是 `[betas, local_rot6d[52], transl]`，旋转6D存矩阵前两**行*
 
 本机新清单中的数据、网格、文本路径均相对清单目录，保持目录结构即可。`source_path`是来源说明，不用于训练加载。SMPL系数不打包进HOI检查点，恢复/采样仍需相同模型文件。数据、接触点和检查点均检查dataset与SHA256；混用会报错。
 
-当前原生训练数据和AE已经准备完成，迁移整个 `data/` 即可，无需再次转换。旧 `*_with_body_fk` 中间数据、原始BEHAVE及标注已删除；若将来需要从原始材料重建，必须重新取得源数据并运行原始预处理流水线，不能仅凭现在的训练文件重新生成所有旧文件。
+当前原生训练数据和AE已经准备完成，迁移整个 `data/` 即可，无需再次转换。旧 `*_with_body_fk` 中间数据、原始BEHAVE及标注已删除，旧转换工具也列入代码清理清单；若将来需要从原始材料重建，必须重新取得源数据并从Git历史恢复对应预处理工具，不能仅凭现在的训练文件重新生成所有旧文件。
 
 ```bash
 # 验证已有清单与codec；当前数据已全部准备好。
@@ -129,18 +129,13 @@ python -m unified_hoi.smpl_mesh \
 
 复评检查保存的mode、窗口、时间戳、身体资产、接触support/codec和已知条件是否一致，不自动对齐错误帧。完整网格输出BEHAVE6890或OMOMO10475顶点。
 
-## 本机验证与复现
+## 本机验证记录
 
-```bash
-python -m unittest discover -s tests -v
-python scripts/verify_parametric.py --dataset behave --output runs/verify_native_behave
-python scripts/verify_parametric.py --dataset omomo --output runs/verify_native_omomo
-python scripts/verify_parametric.py --resume-test --output runs/verify_native_resume
-```
+下述回归和短程验证已在清理前完成。按用户要求，专用测试代码、验证脚本和大体积验证产物列入清理清单；汇总结果保存在 `docs/code_cleanup_20261021.json`。需要重新运行开发回归时，从Git历史恢复对应测试工具。
 
 集成验证使用完整默认网络宽度/深度、每split一个源片段、8帧窗口、2个训练更新和2个采样步，检查010/100/001、保存后复评、完整网格解码及跨数据集拒绝。断点恢复使用缩小网络验证逐位一致性。回归检查还覆盖两套男女原生LBS精确性、梯度、七模式条件保留与生成目标不泄漏。
 
-此前验证证据位于 `runs/verification/native_20261021/`。data中的旧转换/AE报告已清理，AE的数据集、点集校验值、选中步数、阈值和验证F1仍保存在 `contact_ae/best.pt` 元信息中。最新清理统计见 `docs/data_cleanup_20261021.json`。这些结果只证明已实施流程并能运行，模型效果需要服务器正式训练后判断。
+此前验证产物位于 `runs/verification/native_20261021/`，现在也列入代码清理清单。data中的旧转换/AE报告已清理，AE的数据集、点集校验值、选中步数、阈值和验证F1仍保存在 `contact_ae/best.pt` 元信息中。数据清理统计见 `docs/data_cleanup_20261021.json`，代码与验证产物清理状态见 `docs/code_cleanup_20261021.json`。这些结果只证明已实施流程并能运行，模型效果需要服务器正式训练后判断。
 
 以下为2026-10-21清理前已完成的实测结果；旧数据删除不影响保留的原生训练数据和AE：
 

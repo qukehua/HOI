@@ -1,10 +1,9 @@
-"""Prepare native dataset/contacts, then train its own 128-D contact codec."""
+"""Validate prepared native data, training its isolated contact codec if missing."""
 import argparse
 from pathlib import Path
 
 import torch
 
-from unified_hoi.parametric.prepare import prepare
 from unified_hoi.parametric.contact import train_codec, load_codec
 from unified_hoi.parametric.body import digest_file
 from unified_hoi.data import read_manifest
@@ -13,7 +12,6 @@ from unified_hoi.data import read_manifest
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dataset", choices=("behave", "omomo"), required=True)
-    p.add_argument("--resume", action="store_true")
     p.add_argument("--codec-steps", type=int, default=3000)
     p.add_argument("--device", default="cpu")
     args = p.parse_args()
@@ -21,13 +19,9 @@ def main():
     root = Path("data/parametric_assets") / args.dataset
     manifest = Path(f"data/processed/{args.dataset}_parametric.jsonl")
     if not manifest.exists():
-        legacy = Path(f"data/processed/{args.dataset}_with_body_fk.jsonl")
-        if not legacy.is_file():
-            raise FileNotFoundError(
-                f"Missing {manifest}. This checkout retains only prepared native training data; "
-                "restore the native manifest and records from your transfer/backup. "
-                "Rebuilding requires separately acquiring the original data and legacy preprocessing inputs.")
-        prepare(f"data/processed/{args.dataset}_with_body_fk.jsonl", manifest, args.dataset, root, resume=args.resume)
+        raise FileNotFoundError(
+            f"Missing {manifest}. Restore the prepared native manifest and records from your transfer/backup. "
+            "This checkout no longer contains the legacy raw-data conversion pipeline.")
     if not (root / "contact_ae/best.pt").exists():
         train_codec(manifest, root / "contact_ae", args.dataset, root / "contact_support.npz",
                     steps=args.codec_steps, device=args.device)

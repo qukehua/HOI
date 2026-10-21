@@ -20,7 +20,7 @@ python -m unified_hoi.train --config configs/train_omomo.yaml
 
 分别启动各自的训练；同一张GPU通常依次执行。正式HOI训练由用户在服务器启动，本机只执行数据准备、接触AE训练及CPU短程验证。当前BEHAVE源手姿是固定值，OMOMO没有手指标注，后者使用显式中性手姿；**支持手指参数不代表已经有动态手指监督**。两套AE独立训练，不使用或声称复现TriDi官方预训练latent坐标。
 
-本次重建了 `tests/test_parametric.py` 和 `scripts/verify_parametric.py` 供新路径回归验证。以前的测试清理记录仅描述历史执行。
+当前公开入口只运行原生参数模型。旧22关节训练、采样、预处理、控制示例和失效配置已退出运行依赖；按用户要求，回归测试代码和短程验证产物也列入清理清单。实际删除状态见 `docs/code_cleanup_20261021.json`。
 
 ## 现在训练需要哪些数据
 
@@ -33,4 +33,16 @@ python -m unified_hoi.train --config configs/train_omomo.yaml
 
 将整个 `data/` 保持目录结构迁移到服务器即可。原始BEHAVE、原始文本标注、两套旧body-FK中间数据及旧数据说明已按用户选择删除，不参与当前训练。`OMOMO/` 位于本次清理范围外。
 
-旧配置 `configs/legacy_body_fk/` 仅保留作代码参考，其旧数据已删除；当前训练使用本页上方两份配置。
+## 代码目录
+
+- `src/unified_hoi/parametric/`：当前模型、扩散、训练、采样、接触AE和评估。
+- `src/unified_hoi/`：公开CLI及当前模型复用的注意力层、清单、几何、人体资产和运行工具。
+- `scripts/benchmark.py`：批量评估；`prepare_parametric.py`：检查已准备的数据及AE；`cache_text.py`：缓存真实文本条件。
+- `configs/`：BEHAVE、OMOMO两份正式配置及默认OMOMO配置。
+- `docs/PARAMETRIC_RETRAINING.md`：当前使用说明；`docs/UPSTREAM.md`：保留代码的来源与许可证。
+
+清理脚本默认只预览并校验；执行后移除旧代码、重复压缩包和验证产物。当前数据、两套接触AE、人体资产、环境和原始 `OMOMO/` 均保留。按用户要求，整个 `external/` 目录及其全部参考仓库也保留，脚本禁止删除该目录或其任何子路径。
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "D:\code\HOI\scripts\cleanup_current_model.ps1" -Execute
+```

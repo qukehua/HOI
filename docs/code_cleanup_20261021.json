@@ -1,0 +1,635 @@
+﻿{
+    "date":  "2026-10-21",
+    "status":  "complete",
+    "runtime_files":  10139,
+    "runtime_bytes":  1149541887,
+    "duplicate_zip":  {
+                          "path":  "data/processed.zip",
+                          "entries_verified":  10131
+                      },
+    "execution_block":  {
+                            "action":  "Remove-Item configs/legacy_body_fk/unified.yaml",
+                            "result":  "blocked by policy",
+                            "detail":  "Tool rejected process creation; no additional reason supplied."
+                        },
+    "runtime_content_fingerprint":  "269e2f9776540d46ccf5974bfdee1e2382c97447dcfd3cd895b1b0d5f696878f",
+    "runtime_directories":  [
+                                "data/processed",
+                                "data/parametric_assets",
+                                "data/smplx_models"
+                            ],
+    "protected_omomo_inventory":  "6c557dc7d0b2950fa662eb5eb2acb2481a26d1e7dd839e511fe1d8e6496a2ee1",
+    "manual_execution_script":  "scripts/cleanup_current_model.ps1",
+    "deletions":  [
+                      {
+                          "path":  "src/unified_hoi/controls.py",
+                          "category":  "legacy_runtime",
+                          "files":  1,
+                          "bytes":  24196,
+                          "inventory_sha256":  "aa2f057690c6e24cfd1122dca2e2e6a4e904d0c811a08f27332282d3e7aa5b81",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "src/unified_hoi/diffusion.py",
+                          "category":  "legacy_runtime",
+                          "files":  1,
+                          "bytes":  7418,
+                          "inventory_sha256":  "9ca811d1aba3bfad17adfbbab04675d56648519443ed7cbb5d3b5fadab9bc981",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "src/unified_hoi/normalization.py",
+                          "category":  "legacy_runtime",
+                          "files":  1,
+                          "bytes":  1671,
+                          "inventory_sha256":  "d8597246c4e88d5d75b26681e658898563fe8a3bb50a2839d551cbb016698a7e",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "src/unified_hoi/objectives.py",
+                          "category":  "legacy_runtime",
+                          "files":  1,
+                          "bytes":  3117,
+                          "inventory_sha256":  "f633b05b68262bd00dd30270996a0896c863bd20fe7a1f00b9e1fcabdb10878f",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "src/unified_hoi/kinematic_projection.py",
+                          "category":  "legacy_runtime",
+                          "files":  1,
+                          "bytes":  8693,
+                          "inventory_sha256":  "6299817176e9072555cca5ffd927a0349e14e4b36d1279d38ed99166f45bba98",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "src/unified_hoi/body_geometry.py",
+                          "category":  "legacy_runtime",
+                          "files":  1,
+                          "bytes":  5535,
+                          "inventory_sha256":  "16cc3fadd30182c07e60579a530ee7a46fbce77a3816b44a5f171037db6e99e2",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "src/unified_hoi/preprocess.py",
+                          "category":  "legacy_runtime",
+                          "files":  1,
+                          "bytes":  27838,
+                          "inventory_sha256":  "aab639bba11d81cd865eb69fdbca2667c916b1530985bbe0c32f33f5ea33a669",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "src/unified_hoi/paper_metrics.py",
+                          "category":  "legacy_runtime",
+                          "files":  1,
+                          "bytes":  23234,
+                          "inventory_sha256":  "39e857b42e154ef3bdc3ccaa17ddcec4d2945fd8b1532cb873026bf746632077",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "src/unified_hoi/tridi_metrics.py",
+                          "category":  "legacy_runtime",
+                          "files":  1,
+                          "bytes":  10534,
+                          "inventory_sha256":  "5924d613f2a99d3b3db5f93e77a20b2321ef93e1b8ef3cb812cafddda7964004",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "src/unified_hoi/evaluate_features.py",
+                          "category":  "legacy_runtime",
+                          "files":  1,
+                          "bytes":  9235,
+                          "inventory_sha256":  "120706dd76541a02e173e10b4254eac495632232535df04fd87723d194a91a32",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "src/unified_hoi/integrations/kimodo.py",
+                          "category":  "legacy_runtime",
+                          "files":  1,
+                          "bytes":  17756,
+                          "inventory_sha256":  "547626e9de1f7a6afaa9693353997fadb6972b5e1d74263be506d816c5538b8e",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "src/unified_hoi/integrations/upstream.py",
+                          "category":  "legacy_runtime",
+                          "files":  1,
+                          "bytes":  3137,
+                          "inventory_sha256":  "c2d1aa127cb094a1d4397879652689473cd8b13fb0c849d9baa893e11698d2e7",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "src/unified_hoi/integrations/licenses/KIMODO_LICENSE.txt",
+                          "category":  "legacy_runtime",
+                          "files":  1,
+                          "bytes":  11588,
+                          "inventory_sha256":  "a54f66f5d19141fda05228b24da5496f0e4e85f1a648298143a568dfd6e32836",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "src/unified_hoi/parametric/prepare.py",
+                          "category":  "legacy_runtime",
+                          "files":  1,
+                          "bytes":  8294,
+                          "inventory_sha256":  "96a045aaf6e3c8678dcfcb44e3f34878e5d4d87c92d26ef16662a3a6196a5f68",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "configs/legacy_body_fk",
+                          "category":  "legacy_configs_examples",
+                          "files":  3,
+                          "bytes":  3644,
+                          "inventory_sha256":  "469e876cfee5fdfabc2a9ca15bdbd1c539a98b5971615be52f95014eda369f79",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "configs/ablations",
+                          "category":  "legacy_configs_examples",
+                          "files":  6,
+                          "bytes":  5485,
+                          "inventory_sha256":  "26c7ef63b6332af6242609d9a338076bca84d664e984e430b7d8f3eeca6253b9",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "examples",
+                          "category":  "legacy_configs_examples",
+                          "files":  2,
+                          "bytes":  651,
+                          "inventory_sha256":  "9491d064fc9746ba16760b563f8f3042eb80302c7e69f9053abfd4535d60946b",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "scripts/cleanup_processed.ps1",
+                          "category":  "retired_tools",
+                          "files":  1,
+                          "bytes":  6957,
+                          "inventory_sha256":  "dcdd3c89ce3eb92d537fc02e66b8019054603a192e1b4fa0dcdb7da8392315e2",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "scripts/cleanup_project.ps1",
+                          "category":  "retired_tools",
+                          "files":  1,
+                          "bytes":  5514,
+                          "inventory_sha256":  "66a2ce626683142c742d13b5bd2c26965fa4395af4b9c04e6528ff570220624a",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "scripts/combine_manifests.py",
+                          "category":  "retired_tools",
+                          "files":  1,
+                          "bytes":  1680,
+                          "inventory_sha256":  "7fe54b29163de48ba18d22211dfe7fb2c02088bdd629cfe09e6af9dcecb8e131",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "scripts/download_behave.py",
+                          "category":  "retired_tools",
+                          "files":  1,
+                          "bytes":  4467,
+                          "inventory_sha256":  "f8d41a994fa111170bd51db445c502e5bc405931ab6813def8a0a0a4addd9800",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "scripts/download_behave_text.py",
+                          "category":  "retired_tools",
+                          "files":  1,
+                          "bytes":  3817,
+                          "inventory_sha256":  "69852119d64d554ad21ca9579d42a8168f1effa702c601e256b67e5c7c791745",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "scripts/prepare_behave_text.py",
+                          "category":  "retired_tools",
+                          "files":  1,
+                          "bytes":  11641,
+                          "inventory_sha256":  "6336259fc06956d1ef228fae3646e0fc5a64cc2110b1e2204c67d5ac75d8ed33",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "scripts/prepare_body_geometry.py",
+                          "category":  "retired_tools",
+                          "files":  1,
+                          "bytes":  5762,
+                          "inventory_sha256":  "26a737a67f13b7c21e72a62600e9b728661778cd4b0c475d39b8ab63e970831f",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "scripts/prepare_body_metadata.py",
+                          "category":  "retired_tools",
+                          "files":  1,
+                          "bytes":  5729,
+                          "inventory_sha256":  "a32c8160f0ab11e45fa5a238c09e44f2ca81626c674a8dcc3e343910e81c61d2",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "scripts/prepare_object_meshes.py",
+                          "category":  "retired_tools",
+                          "files":  1,
+                          "bytes":  6806,
+                          "inventory_sha256":  "2af89cb7e9121440d7bb245ab90861f6b7947223f40039f947a933eb9cfc725b",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "scripts/prepare_omomo_text.py",
+                          "category":  "retired_tools",
+                          "files":  1,
+                          "bytes":  1247,
+                          "inventory_sha256":  "6aed2517402f4ad816319236a7a734ea55881f76d776a8bd6ba7d46a05698d0e",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "scripts/fetch_upstreams.py",
+                          "category":  "retired_tools",
+                          "files":  1,
+                          "bytes":  2298,
+                          "inventory_sha256":  "3ec4d6a562ce60b0866486981fcb26415d3ce509ef70050c42d43dbd1cc13408",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "scripts/make_ablation_configs.py",
+                          "category":  "retired_tools",
+                          "files":  1,
+                          "bytes":  1379,
+                          "inventory_sha256":  "4ab6c9106cb4434682e9105f3abc68e32176d3d2a33778c8d74bcb7cf2f24237",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "docs/DATA.md",
+                          "category":  "legacy_documentation",
+                          "files":  1,
+                          "bytes":  16631,
+                          "inventory_sha256":  "7e7e4362cd9bbffd79b3cf18b4eecb97fba770af3b715ea2c97da90b0dbd5eb2",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "docs/CONTROLS.md",
+                          "category":  "legacy_documentation",
+                          "files":  1,
+                          "bytes":  7994,
+                          "inventory_sha256":  "e19b633eb7ce18cdedc916869f009e2a8e542a7d0135f33f2dfcd679b9fb03db",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "docs/SMPL_VISUALIZATION.md",
+                          "category":  "legacy_documentation",
+                          "files":  1,
+                          "bytes":  10193,
+                          "inventory_sha256":  "bdb12a4471c97ca82438e39240867e92a0dab348cf80187283737e585641640e",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "docs/METHOD.md",
+                          "category":  "legacy_documentation",
+                          "files":  1,
+                          "bytes":  8675,
+                          "inventory_sha256":  "391d7f387d9107b811952bee00093b023ea52945321252cbe111cd41b48279a7",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "docs/IMPLEMENTATION_STATUS.md",
+                          "category":  "legacy_documentation",
+                          "files":  1,
+                          "bytes":  12488,
+                          "inventory_sha256":  "edf06245b606489ed0b1fb342edb76dcb82c014febaa425cd1e61ea3b3410ac5",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "docs/EVALUATION.md",
+                          "category":  "legacy_documentation",
+                          "files":  1,
+                          "bytes":  17808,
+                          "inventory_sha256":  "2c3c5af3d19857ed7c92b026df1e5b0d1bc4fa6098e29b18347e82ccc9e13ecf",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "docs/data_reports",
+                          "category":  "legacy_documentation",
+                          "files":  7,
+                          "bytes":  225999,
+                          "inventory_sha256":  "dded3399400d5e8f8292473d163839e2256edc1eafd13b62a693bd0d55e619d5",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "docs/project_cleanup_report.json",
+                          "category":  "legacy_documentation",
+                          "files":  1,
+                          "bytes":  19325,
+                          "inventory_sha256":  "f062a87319c6ef0eae91a378e0bf00695d8e370200ee5f38f92fc95dcd423ea5",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "docs/processed_cleanup_report.json",
+                          "category":  "legacy_documentation",
+                          "files":  1,
+                          "bytes":  17589,
+                          "inventory_sha256":  "27b62a1f32435527ad93a924abe862afafd768a2df365e2b697f39d49b2cde29",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "requirements-tested.txt",
+                          "category":  "legacy_documentation",
+                          "files":  1,
+                          "bytes":  358,
+                          "inventory_sha256":  "1e23e712a99a90b6bfbfafa67206b0d03a51377e99484225895934c4c45d17e3",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "tests",
+                          "category":  "tests_verification",
+                          "files":  1,
+                          "bytes":  13320,
+                          "inventory_sha256":  "2d6316b02575cd772d50f53443cbd16abca6c476fe3ccf4a7c1eef6eeced549c",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "scripts/verify_parametric.py",
+                          "category":  "tests_verification",
+                          "files":  1,
+                          "bytes":  6418,
+                          "inventory_sha256":  "0955655d20d60e45a39be4c2170e4b2c0e4065e9fd6502672a8c02d6fa290f62",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "runs/verification",
+                          "category":  "tests_verification",
+                          "files":  155,
+                          "bytes":  3685861322,
+                          "inventory_sha256":  "e6125f1ba0c94100b24c0d1f2ad4072d50bec4e571b15e2f1ba15e330fad4e78",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "runs/maintenance",
+                          "category":  "tests_verification",
+                          "files":  4,
+                          "bytes":  5613950,
+                          "inventory_sha256":  "42e6e0675f3d166e735bb02d6b495064796d32e920f1988160d6fbc3f9d1ea5d",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "data/processed.zip",
+                          "category":  "duplicate_archive",
+                          "files":  1,
+                          "bytes":  725046884,
+                          "inventory_sha256":  "9c83990c71fbf19410945fd2e054f2f55e67bc9cde703933bd2c8b27cec1a8ec",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  ".ruff_cache",
+                          "category":  "cache",
+                          "files":  5,
+                          "bytes":  1370,
+                          "inventory_sha256":  "12c12ef5e016d2421410aca8fec64e2e957c370132c20ee20ac2597f2df61f30",
+                          "deleted":  true
+                      }
+                  ],
+    "planned_files":  220,
+    "planned_bytes":  4417109647,
+    "protected_paths":  [
+                            "data/processed",
+                            "data/parametric_assets",
+                            "data/smplx_models",
+                            "OMOMO",
+                            ".venv",
+                            ".git",
+                            "external"
+                        ],
+    "validation":  {
+                       "unit_tests_before":  13,
+                       "unit_tests_after":  13,
+                       "behave":  {
+                                      "dataset":  "behave",
+                                      "cpu_only":  true,
+                                      "formal_training":  false,
+                                      "training_steps":  2,
+                                      "sample_steps":  2,
+                                      "window":  8,
+                                      "modes_evaluated":  [
+                                                              "010",
+                                                              "100",
+                                                              "001"
+                                                          ],
+                                      "saved_metrics_replay_exact":  true,
+                                      "full_mesh_shape":  [
+                                                              8,
+                                                              6890,
+                                                              3
+                                                          ],
+                                      "surface_decode_matches_full_native":  true,
+                                      "cross_dataset_rejection":  "Prediction provenance mismatch: dataset",
+                                      "training_files_only":  true
+                                  },
+                       "omomo":  {
+                                     "dataset":  "omomo",
+                                     "cpu_only":  true,
+                                     "formal_training":  false,
+                                     "training_steps":  2,
+                                     "sample_steps":  2,
+                                     "window":  8,
+                                     "modes_evaluated":  [
+                                                             "010",
+                                                             "100",
+                                                             "001"
+                                                         ],
+                                     "saved_metrics_replay_exact":  true,
+                                     "full_mesh_shape":  [
+                                                             8,
+                                                             10475,
+                                                             3
+                                                         ],
+                                     "surface_decode_matches_full_native":  true,
+                                     "cross_dataset_rejection":  "Prediction provenance mismatch: dataset",
+                                     "training_files_only":  true
+                                 },
+                       "resume":  {
+                                      "model_and_ema_bitwise_equal":  true,
+                                      "max_difference":  0.0,
+                                      "continuous_steps":  2,
+                                      "resumed_after_step":  1,
+                                      "cpu_only":  true
+                                  },
+                       "vendored_tridi_bodies_match_upstream":  true,
+                       "imports_without_retired_modules":  22,
+                       "cli_help_passed":  7,
+                       "prepared_datasets_and_codecs_checked":  true,
+                       "ruff_changed_sources_passed":  true,
+                       "shared_definitions_unchanged":  12,
+                       "cleanup_script_syntax_and_readonly_preview_passed":  true,
+                       "external_excluded_and_all_three_repositories_present":  true
+                   },
+    "deleted_files":  220,
+    "deleted_bytes":  4417109647,
+    "retired_modules":  [
+                            "unified_hoi.body_geometry",
+                            "unified_hoi.controls",
+                            "unified_hoi.diffusion",
+                            "unified_hoi.evaluate_features",
+                            "unified_hoi.integrations.kimodo",
+                            "unified_hoi.integrations.upstream",
+                            "unified_hoi.kinematic_projection",
+                            "unified_hoi.normalization",
+                            "unified_hoi.objectives",
+                            "unified_hoi.paper_metrics",
+                            "unified_hoi.parametric.prepare",
+                            "unified_hoi.preprocess",
+                            "unified_hoi.tridi_metrics"
+                        ],
+    "retained_sources":  [
+                             {
+                                 "path":  ".gitignore",
+                                 "sha256":  "40126764cbe4b686d85de467548735e277383027d6b8b4c355d07915929edb51"
+                             },
+                             {
+                                 "path":  "AGENTS.md",
+                                 "sha256":  "40775bb41245d6309ddafcaf95696f78292177e1d530939e159ae15d0d2ce2b3"
+                             },
+                             {
+                                 "path":  "configs/train_behave.yaml",
+                                 "sha256":  "ea3c7138526b18f29cce1a9be9f0138a508c1852cca0b88ced450a078fbd66f4"
+                             },
+                             {
+                                 "path":  "configs/train_omomo.yaml",
+                                 "sha256":  "a042d8e785783a7a3bd0c345f8d78b4b6bfc3989fe47374be33381e585a52a0a"
+                             },
+                             {
+                                 "path":  "configs/unified.yaml",
+                                 "sha256":  "787c552827eae9ce5c13ed8e6a81fb4922839efb2d580d90d7f225300a58571b"
+                             },
+                             {
+                                 "path":  "data/README.md",
+                                 "sha256":  "9d3930060cca97c3b4d8315caf21fd090c063b1192a0f2424c82638c6ee7f7bf"
+                             },
+                             {
+                                 "path":  "docs/PARAMETRIC_RETRAINING.md",
+                                 "sha256":  "46e027b2db05921e063adaf1d5385839d3c0394fdff2fab3373e1e5aa702de97"
+                             },
+                             {
+                                 "path":  "docs/UPSTREAM.md",
+                                 "sha256":  "dce3e58f85fa6e450d90708e423e6faca6bdd9d3bd5128aeb5e5aacc24686cd4"
+                             },
+                             {
+                                 "path":  "pyproject.toml",
+                                 "sha256":  "21640993410eb80ca4e87b1eb6c9c9406f15da1261da5e720f1143b8cf30fce2"
+                             },
+                             {
+                                 "path":  "README.md",
+                                 "sha256":  "683df48dbce3115be59434796dc4fa07a838d07de106767af52f7fd459f49869"
+                             },
+                             {
+                                 "path":  "scripts/benchmark.py",
+                                 "sha256":  "ba93f93d76c51ac592899ce6c8a19f47b3a0b90942bb183bfd3aad025c2a6b31"
+                             },
+                             {
+                                 "path":  "scripts/cache_text.py",
+                                 "sha256":  "238e20bcb6a009032b563140a1d08026c05c87cfad92c7c259ddb42bed41673a"
+                             },
+                             {
+                                 "path":  "scripts/cleanup_current_model.ps1",
+                                 "sha256":  "f1020a2f85b8a15fa79f54efdf7ca61739cf03501195f10809ad2ca5415f210a"
+                             },
+                             {
+                                 "path":  "scripts/prepare_parametric.py",
+                                 "sha256":  "e56b2d89ce08ef959b9d0bfda45ab8b2fd8873888ffc1615e0f562815bd2722a"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/__init__.py",
+                                 "sha256":  "5ff092f73e4b5448295c8f4afbe4f7d2273cd156befdaf9414b17d50f3ee3b61"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/body_metadata.py",
+                                 "sha256":  "351f7eac8dc3e32b059e35cab7bcc7576a7a788191252c559954ba942b316287"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/data.py",
+                                 "sha256":  "a8c020d8d356a7b00ba542469df95ad28914326fa46a731f6c3d250ecdf2ee93"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/evaluate.py",
+                                 "sha256":  "d14e8c1abef98e85e805281d515ee51cf2785fafd98232413a633c351c89b01a"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/geometry.py",
+                                 "sha256":  "7f134c5d0b09fc117282a122d06cd629a7d8c40570604c80c23e91fabde937a7"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/integrations/__init__.py",
+                                 "sha256":  "5f2580bc95290ac5f07c6de488e51cf5b841d03936b52a804da481b516d4c35f"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/integrations/_tridi_primitives.py",
+                                 "sha256":  "1aab1135b2be2eb4cf8cac334bb1177a44d75f3f49aa0fefc213ace1347ee776"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/integrations/licenses/TRIDI_LICENSE.txt",
+                                 "sha256":  "1fac0cf87b6a07cdf3e0278aee11b9a05db31547dd085b6ffc4ef3a6b85f4c83"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/mesh_geometry.py",
+                                 "sha256":  "4dd587ff0ec5a6b1c403e5ed079d1c3a3339e7f865d71eb5a3f7db2cc5cd39c5"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/model.py",
+                                 "sha256":  "8323a7db592d24aaf0653da71fca4e1f6f05f2786fca77ec4109ccdb88c5100d"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/parametric/__init__.py",
+                                 "sha256":  "ca523286d08756f637e312b86c2e8fc9829e79eb0ef5e185199ffe771df6b21c"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/parametric/body.py",
+                                 "sha256":  "d7b8c3691da295730959065b4b92f7c501e27f401cc79330374f4d1d110932aa"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/parametric/contact.py",
+                                 "sha256":  "99f9a5c650a05c99e637f162cdb566106007f3d14b99528773f344168dee5bbe"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/parametric/data.py",
+                                 "sha256":  "53b3519b92cadeba6ef6d081df96cfbd7e810787681621f91d850e9f9ede2635"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/parametric/diffusion.py",
+                                 "sha256":  "d1ae98132a8bb1bbbf389192c372d386a614691a885fbda2384a67c79a315877"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/parametric/evaluate.py",
+                                 "sha256":  "1ab9a1190839605805ce59b93b967010ee6db3e1ce8bf131ce84b005f1e4326b"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/parametric/model.py",
+                                 "sha256":  "7ae16c841cb31082126c5c0041cd4f94a3290f3d61a9c24851cc3cc7d12146c9"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/parametric/sample.py",
+                                 "sha256":  "983f5bbc9d043d5fa323c18a1915dde45033d1b1bc10f88a09f7993fff8a961c"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/parametric/train.py",
+                                 "sha256":  "bd1c8a71ac3992f7419aa748a99dce9b9e484ffc10d51bd8986f7e5b6040b195"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/runtime.py",
+                                 "sha256":  "5a47f77ff43fb463fdf0fcb5d356ce7d78815622748562fa6ce0c38d01c47ac8"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/sample.py",
+                                 "sha256":  "d04562ff6585c23c41b6bd00b9fe347ecd4efef66541a6bac7943abb97407b25"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/smpl_mesh.py",
+                                 "sha256":  "a6a5f04194442d2be8038d77d03294e1addd44b2a54b5c3c8b2ec3b0fe2ec5ba"
+                             },
+                             {
+                                 "path":  "src/unified_hoi/train.py",
+                                 "sha256":  "8596d7f96d8b73f5cb653a757c4f9e26de889563825b4a20f8d638d1ff816e0a"
+                             }
+                         ],
+    "excluded_by_user":  [
+                             {
+                                 "path":  "external",
+                                 "reason":  "User explicitly requested retaining the entire external directory and all descendants.",
+                                 "files":  558,
+                                 "bytes":  161694527
+                             }
+                         ],
+    "post_cleanup_verified":  true
+}

@@ -20,6 +20,7 @@ weight_decay: 0.01
 gradient_clip: 1.0
 ema_decay: 0.999
 diffusion_steps: 1000
+timestep_sampling: shared
 geometry_weight: 1.0
 geometry_max_t: 250
 geometry_frames: 16

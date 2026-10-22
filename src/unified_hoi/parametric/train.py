@@ -13,7 +13,7 @@ from . import REPRESENTATION
 from .body import BodyGeometry, digest_file
 from .contact import load_codec
 from .data import ParametricDataset
-from .diffusion import controls_for, ParametricDiffusion
+from .diffusion import controls_for, ParametricDiffusion, TIMESTEP_SAMPLING
 from .evaluate import reconstruction
 from .model import ParametricConfig, ParametricDenoiser, add_geometry_batch
 from .evaluation_protocol import frame_plan, window_selection, VERSION
@@ -53,6 +53,9 @@ def load_run(path, device="cpu"):
 def run_training(config, resume=None):
     from ..train import make_loader, update_ema, init_swanlab, log_swanlab, finish_swanlab
     config = deepcopy(config)
+    config.setdefault("timestep_sampling", "shared")
+    if config["timestep_sampling"] not in TIMESTEP_SAMPLING:
+        raise ValueError(f"timestep_sampling must be one of {TIMESTEP_SAMPLING}")
     if config.get("representation") != REPRESENTATION or config.get("dataset") not in ("behave", "omomo"):
         raise ValueError("Set representation: parametric_v1 and one dataset")
     dataset_name = config["dataset"]
@@ -114,10 +117,16 @@ def run_training(config, resume=None):
     best = {"010": float("inf"), "100": float("inf")}
     if resume:
         saved = torch.load(resume, map_location="cpu", weights_only=False)
+        saved_config = dict(saved["config"])
+        # Checkpoints before this option used independent H/O/C training times.
+        saved_config.setdefault("timestep_sampling", "independent")
+        if config["timestep_sampling"] != saved_config["timestep_sampling"]:
+            raise ValueError("Resume timestep_sampling changed; start a fresh run for shared-timestep training. "
+                             "Old checkpoints without this field use independent timesteps.")
         mutable = {"max_steps", "output", "device", "log_every", "save_every", "progress", "use_swanlab",
                    "swanlab_run_name", "swanlab_mode", "swanlab_workspace", "cpu_threads"}
         if ({k: v for k, v in config.items() if k not in mutable}
-                != {k: v for k, v in saved["config"].items() if k not in mutable}):
+                != {k: v for k, v in saved_config.items() if k not in mutable}):
             raise ValueError("Native resume training semantics/config changed")
         if saved["geometry_provenance"] != provenance or saved["codec_metadata"] != codec_metadata:
             raise ValueError("Body/contact assets changed since checkpoint")
@@ -136,6 +145,7 @@ def run_training(config, resume=None):
     output.mkdir(parents=True, exist_ok=True)
     write_json(output / "config.json", config)
     info = {"representation": REPRESENTATION, "dataset": dataset_name,
+            "timestep_sampling": config["timestep_sampling"],
             "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
             "frozen_contact_parameters": sum(p.numel() for p in model.codec.parameters()),
             "body_assets_in_checkpoint": False, "geometry_provenance": provenance,

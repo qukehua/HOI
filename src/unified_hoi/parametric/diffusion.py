@@ -8,6 +8,7 @@ from .body import beta_count, split_human
 from .model import MODALITIES
 
 MODES = ("100", "010", "001", "110", "101", "011", "111")
+TIMESTEP_SAMPLING = ("shared", "independent")
 
 
 def controls_for(batch, dataset, mode=None, generator=None, allowed=None):
@@ -32,6 +33,24 @@ def apply_masks(states, values, masks):
     return {k: torch.where(masks[k], values[k], states[k]) for k in MODALITIES}
 
 
+def training_timesteps(masks, steps, sampling="shared", generator=None):
+    """One noise level per example for generated modalities; observed modalities use zero.
+
+    Sharing the timestep does not share the Gaussian noise, drawn separately below.
+    Partial conditions (e.g. OMOMO neutral hands) do not mark the whole human as known.
+    """
+    if sampling not in TIMESTEP_SAMPLING:
+        raise ValueError(f"timestep_sampling must be one of {TIMESTEP_SAMPLING}")
+    human_mask = masks["human"]
+    columns = 1 if sampling == "shared" else len(MODALITIES)
+    times = torch.randint(1, steps + 1, (len(human_mask), columns),
+                          device=human_mask.device, generator=generator)
+    if sampling == "shared":
+        times = times.expand(-1, len(MODALITIES))
+    known = torch.stack([masks[k].flatten(1).all(1) for k in MODALITIES], -1)
+    return times.masked_fill(known, 0)
+
+
 class ParametricDiffusion:
     def __init__(self, steps=1000):
         if steps < 2:
@@ -43,12 +62,9 @@ class ParametricDiffusion:
 
     def training_loss(self, model, batch, masks, geometry, config, generator=None):
         clean = model.normalizer.encode(batch)
-        b = len(batch["human"])
-        times = torch.randint(1, self.steps + 1, (b, 3), device=batch["human"].device, generator=generator)
+        times = training_timesteps(masks, self.steps, config.get("timestep_sampling", "shared"), generator)
         noisy = {}
         for i, k in enumerate(MODALITIES):
-            known = masks[k].flatten(1).all(1)
-            times[:, i] = torch.where(known, 0, times[:, i])
             a = self.alpha.to(times.device)[times[:, i]][:, None, None]
             noise = torch.randn(clean[k].shape, device=times.device, generator=generator)
             noisy[k] = a.sqrt() * clean[k] + (1 - a).sqrt() * noise

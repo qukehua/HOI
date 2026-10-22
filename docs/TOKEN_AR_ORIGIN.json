@@ -1,0 +1,44 @@
+{
+  "baseline": "parametric_v1",
+  "new_model": "token_ar_v1",
+  "git_commit": "b15e846d155a86be2867c1085ce3316ab4f0c956",
+  "copied_files": {
+    "body.py": {
+      "sha256": "d7b8c3691da295730959065b4b92f7c501e27f401cc79330374f4d1d110932aa",
+      "copy": "src/unified_hoi/token_ar/body.py"
+    },
+    "data.py": {
+      "sha256": "b5f518625366cddf75636d2a275d34cd6fa762cbe50ab3155f1072c1dbdbff24",
+      "copy": "src/unified_hoi/token_ar/native_data.py"
+    },
+    "evaluation_protocol.py": {
+      "sha256": "86efbebfdb9c4c555a5f8cf7a4cdcfeecd3e0c99978d9e9c4cef3df7c2e8f1d5",
+      "copy": "src/unified_hoi/token_ar/evaluation_protocol.py"
+    }
+  },
+  "baseline_sha256": {
+    "src/unified_hoi/parametric/body.py": "d7b8c3691da295730959065b4b92f7c501e27f401cc79330374f4d1d110932aa",
+    "src/unified_hoi/parametric/contact.py": "c09d85f5ed67111b5b0f2bef0751521c0542a29771d22df2e03f2d7e6f17763e",
+    "src/unified_hoi/parametric/contact_supervision.py": "d01d007540b4b276dcdf0df15e47562c17209226240876c7a5f2fc836fd1afdc",
+    "src/unified_hoi/parametric/data.py": "b5f518625366cddf75636d2a275d34cd6fa762cbe50ab3155f1072c1dbdbff24",
+    "src/unified_hoi/parametric/diffusion.py": "d96a8626cce77ef525504eecd661463d8b2a288f2fd3bf394be8edc3793cda8f",
+    "src/unified_hoi/parametric/evaluate.py": "52942bbc20d79aea4d3604ccf09a69ef8df30bade5396e01456c5e82079ffe4f",
+    "src/unified_hoi/parametric/evaluation_protocol.py": "86efbebfdb9c4c555a5f8cf7a4cdcfeecd3e0c99978d9e9c4cef3df7c2e8f1d5",
+    "src/unified_hoi/parametric/model.py": "7ae16c841cb31082126c5c0041cd4f94a3290f3d61a9c24851cc3cc7d12146c9",
+    "src/unified_hoi/parametric/sample.py": "983f5bbc9d043d5fa323c18a1915dde45033d1b1bc10f88a09f7993fff8a961c",
+    "src/unified_hoi/parametric/train.py": "529272fb357a07283e99b0d38654fc7726956be13bd1280ba90aebdebf2a62e6",
+    "src/unified_hoi/parametric/__init__.py": "ca523286d08756f637e312b86c2e8fc9829e79eb0ef5e185199ffe771df6b21c"
+  },
+  "copied_metrics": {
+    "source": "src/unified_hoi/parametric/evaluate.py",
+    "sha256": "6b8a886b18284df920f6caa1578268957f46d59a7b8343a874ef3de36f60804c",
+    "functions": [
+      "contact_scores",
+      "mesh_contacts",
+      "reconstruction",
+      "rotation_matrices",
+      "similarity"
+    ],
+    "change": "CONTACT_DIFFUSED label renamed CONTACT_TOKEN; decoder supplied identity on probabilities"
+  }
+}

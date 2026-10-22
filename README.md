@@ -1,5 +1,7 @@
 # Unified Controllable HOI — 原生人体参数重训
 
+项目现有两条独立模型路径：原扩散模型 `src/unified_hoi/parametric/` 保持原入口；新建的 `src/unified_hoi/token_ar/` 使用三套VQ-VAE和语言模型进行mask多任务自回归生成。新路线已选定 **Qwen3.5-4B-Base 全参数训练，不使用 LoRA**；两套数据的 `qwen35_4b_*.yaml` 配置、4×32GB启动命令及验证范围见 [两套模型与Token-AR说明](docs/TOKEN_AR.md)。以下说明仍针对原扩散模型。
+
 当前默认训练路径为 `parametric_v1`，按数据集独立训练、采样、评估：
 
 | 数据集 | 人体输出 H | 接触输出 C | 评估 |
@@ -22,7 +24,7 @@ python -m unified_hoi.train --config configs/train_omomo.yaml
 
 分别启动各自的训练；同一张GPU通常依次执行。正式HOI训练由用户在服务器启动，本机只执行数据准备、接触AE训练及CPU短程验证。当前BEHAVE源手姿是固定值，OMOMO没有手指标注，后者使用显式中性手姿；**支持手指参数不代表已经有动态手指监督**。两套AE独立训练，不使用或声称复现TriDi官方预训练latent坐标。
 
-当前公开入口只运行原生参数模型。旧22关节训练、采样、预处理、控制示例和失效配置已退出运行依赖；按用户要求，回归测试代码和短程验证产物也列入清理清单。实际删除状态见 `docs/code_cleanup_20261021.json`。
+原公开入口运行原生参数扩散模型，Token-AR 使用独立入口。旧22关节实现已清理；本轮继续清理专用测试代码、测试报告和短程验证产物，执行状态统一记录在 `docs/cleanup_tests_docs_20261022.json`。
 
 ## 现在训练需要哪些数据
 
@@ -37,14 +39,15 @@ python -m unified_hoi.train --config configs/train_omomo.yaml
 
 ## 代码目录
 
-- `src/unified_hoi/parametric/`：当前模型、扩散、训练、采样、接触AE和评估。
+- `src/unified_hoi/parametric/`：原生参数扩散模型、训练、采样、接触AE和评估。
+- `src/unified_hoi/token_ar/`：独立的VQ和自回归模型、训练、采样及评估。
 - `src/unified_hoi/`：公开CLI及当前模型复用的注意力层、清单、几何、人体资产和运行工具。
-- `scripts/benchmark.py`：批量评估；`prepare_parametric.py`：检查已准备的数据及AE；`cache_text.py`：缓存真实文本条件。
-- `configs/`：BEHAVE、OMOMO两份正式配置及默认OMOMO配置。
-- `docs/PARAMETRIC_RETRAINING.md`：当前使用说明；`docs/UPSTREAM.md`：保留代码的来源与许可证。
+- `scripts/benchmark.py`：批量评估；`compare_evaluations.py`：比较同口径评估结果；`prepare_parametric.py`：检查数据及AE；`cache_text.py`：缓存真实文本条件。
+- `configs/`：扩散配置；`configs/token_ar/`：VQ、AR和四卡启动配置。
+- `docs/PARAMETRIC_RETRAINING.md`、`docs/TOKEN_AR.md`、`docs/EVALUATION.md`：训练、推理和评估说明；`docs/UPSTREAM.md` 与 `docs/TOKEN_AR_ORIGIN.json`：来源和许可证信息。
 
-清理脚本默认只预览并校验；执行后移除旧代码、重复压缩包和验证产物。当前数据、两套接触AE、人体资产、环境和原始 `OMOMO/` 均保留。按用户要求，整个 `external/` 目录及其全部参考仓库也保留，脚本禁止删除该目录或其任何子路径。
+本轮脚本默认只预览并校验，执行时删除固定清单中的测试代码、报告和验证产物。两条模型路径、运行说明、正式配置、数据、资产和环境均保留。整个 `external/` 及原始 `OMOMO/` 受到保护。历史清理脚本已过期，请使用下面的新命令。
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "D:\code\HOI\scripts\cleanup_current_model.ps1" -Execute
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "D:\code\HOI\scripts\cleanup_tests_docs.ps1" -Execute
 ```

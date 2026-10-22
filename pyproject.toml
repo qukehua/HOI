@@ -14,11 +14,16 @@ dev = ["ruff>=0.6"]
 body = ["smplx>=0.1.28"]
 text = ["transformers>=4.40", "safetensors>=0.4"]
 swanlab = ["swanlab>=0.6"]
+token-ar = ["transformers>=5.19,<6", "accelerate>=1.15,<2", "safetensors>=0.4"]
 
 [project.scripts]
 hoi-train = "unified_hoi.train:main"
 hoi-sample = "unified_hoi.sample:main"
 hoi-evaluate = "unified_hoi.evaluate:main"
+hoi-token-train-vq = "unified_hoi.token_ar.train_codecs:main"
+hoi-token-train = "unified_hoi.token_ar.train:main"
+hoi-token-sample = "unified_hoi.token_ar.sample:main"
+hoi-token-evaluate = "unified_hoi.token_ar.evaluate:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

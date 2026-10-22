@@ -84,4 +84,4 @@ python scripts/compare_evaluations.py \
 
 所以仍保存`directly_comparable_to_paper_table=false`。正式对比需让TriDi在同一批源帧、同一坐标约定和同一条件下重新评估，并核对其采样预算和检查点选择。旧MMD/SD必须从逐样本特征或预测重新计算，不能对旧均值直接平方。
 
-回归验证：`python -B -m unittest discover -s tests -v`。
+专用回归代码和测试报告已按用户要求列入清理清单；当前评估入口和上述运行命令保留。

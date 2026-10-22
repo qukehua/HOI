@@ -1,0 +1,545 @@
+﻿{
+    "date":  "2026-10-22",
+    "status":  "complete",
+    "scope":  "Test code, test reports and outputs, superseded cleanup files; both model paths and external are preserved.",
+    "execution_block":  {
+                            "action":  "Remove-Item tests/test_diffusion_timesteps.py",
+                            "reason":  "blocked by policy; process creation rejected with no additional reason"
+                        },
+    "previous_completed_cleanup":  {
+                                       "data_cleanup_20261021":  {
+                                                                     "date":  "2026-10-21",
+                                                                     "status":  "complete",
+                                                                     "deleted_files":  8818,
+                                                                     "deleted_bytes":  1408034860,
+                                                                     "post_cleanup_verified":  null
+                                                                 },
+                                       "code_cleanup_20261021":  {
+                                                                     "date":  "2026-10-21",
+                                                                     "status":  "complete",
+                                                                     "deleted_files":  220,
+                                                                     "deleted_bytes":  4417109647,
+                                                                     "post_cleanup_verified":  true
+                                                                 }
+                                   },
+    "historical_token_ar_validation":  {
+                                           "date":  "2026-10-22",
+                                           "unit_tests":  38,
+                                           "integration":  {
+                                                               "behave":  {
+                                                                              "backbone_family":  "qwen35",
+                                                                              "vq_training_and_resume":  true,
+                                                                              "ar_training_and_resume":  true,
+                                                                              "sampling_and_evaluation":  {
+                                                                                                              "010":  {
+                                                                                                                          "finite":  true,
+                                                                                                                          "frames":  8
+                                                                                                                      },
+                                                                                                              "100":  {
+                                                                                                                          "finite":  true,
+                                                                                                                          "frames":  8
+                                                                                                                      },
+                                                                                                              "001":  {
+                                                                                                                          "finite":  true,
+                                                                                                                          "frames":  8
+                                                                                                                      },
+                                                                                                              "111":  {
+                                                                                                                          "finite":  true,
+                                                                                                                          "frames":  8
+                                                                                                                      }
+                                                                                                          },
+                                                                              "mesh_shape":  [
+                                                                                                 8,
+                                                                                                 6890,
+                                                                                                 3
+                                                                                             ],
+                                                                              "joint_shape":  [
+                                                                                                  8,
+                                                                                                  73,
+                                                                                                  3
+                                                                                              ],
+                                                                              "face_count":  13776
+                                                                          },
+                                                               "omomo":  {
+                                                                             "backbone_family":  "qwen35",
+                                                                             "vq_training_and_resume":  true,
+                                                                             "ar_training_and_resume":  true,
+                                                                             "sampling_and_evaluation":  {
+                                                                                                             "010":  {
+                                                                                                                         "finite":  true,
+                                                                                                                         "frames":  8
+                                                                                                                     },
+                                                                                                             "100":  {
+                                                                                                                         "finite":  true,
+                                                                                                                         "frames":  8
+                                                                                                                     },
+                                                                                                             "001":  {
+                                                                                                                         "finite":  true,
+                                                                                                                         "frames":  8
+                                                                                                                     },
+                                                                                                             "111":  {
+                                                                                                                         "finite":  true,
+                                                                                                                         "frames":  8
+                                                                                                                     }
+                                                                                                         },
+                                                                             "mesh_shape":  [
+                                                                                                8,
+                                                                                                10475,
+                                                                                                3
+                                                                                            ],
+                                                                             "joint_shape":  [
+                                                                                                 8,
+                                                                                                 73,
+                                                                                                 3
+                                                                                             ],
+                                                                             "face_count":  20908
+                                                                         }
+                                                           },
+                                           "limitations":  [
+                                                               "Random tiny models on CPU; no official 4B weights loaded or trained",
+                                                               "No four-GPU FSDP, CUDA optimized kernels, throughput or peak memory benchmark",
+                                                               "No formal model quality evaluation"
+                                                           ],
+                                           "note":  "Historical validation record, not rerun for this documentation cleanup."
+                                       },
+    "manual_execution_script":  "scripts/cleanup_tests_docs.ps1",
+    "protected_roots":  [
+                            "src",
+                            "configs",
+                            "data",
+                            "OMOMO",
+                            "external",
+                            ".venv",
+                            ".git"
+                        ],
+    "deletions":  [
+                      {
+                          "path":  "tests",
+                          "category":  "test_code",
+                          "files":  4,
+                          "bytes":  40118,
+                          "inventory_sha256":  "f976056e538fd78f92d57018323325f967101b2f48a1abc0c89f62b76a301a8a",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "scripts/verify_token_ar.py",
+                          "category":  "test_code",
+                          "files":  1,
+                          "bytes":  6573,
+                          "inventory_sha256":  "654c70468df37adbccbb4f0b3500be60cef00c34f854b32ce848719fd3243607",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "scripts/cleanup_current_model.ps1",
+                          "category":  "obsolete_cleanup",
+                          "files":  1,
+                          "bytes":  8669,
+                          "inventory_sha256":  "a87c772a5af397a84cb5fd82b57ed591bcb8326b6fca353b062c0ccb650686ff",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "docs/cleanup_file_list_20261021.txt",
+                          "category":  "obsolete_cleanup",
+                          "files":  1,
+                          "bytes":  22841,
+                          "inventory_sha256":  "d073c9395391d40c09c2d505f4d537221735da047f60f9e3c0396d516d1faf0f",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "docs/code_cleanup_20261021.json",
+                          "category":  "obsolete_cleanup",
+                          "files":  1,
+                          "bytes":  35171,
+                          "inventory_sha256":  "fc715ef3f048f51353b05e1107cd81a494569385569f3f33f18120a09b25d2c6",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "docs/data_cleanup_20261021.json",
+                          "category":  "obsolete_cleanup",
+                          "files":  1,
+                          "bytes":  1793,
+                          "inventory_sha256":  "be5f606dbb593c43e7746e68b54cdb08894e2c527cc493353bcc79d45f4af951",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "docs/TOKEN_AR_VALIDATION.json",
+                          "category":  "test_reports",
+                          "files":  1,
+                          "bytes":  1968,
+                          "inventory_sha256":  "7dd5d21d835b11f64153bbba4458329fdcabfc6b7ab09624487687ce8b107d66",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "docs/TOKEN_AR_QWEN35_VALIDATION.json",
+                          "category":  "test_reports",
+                          "files":  1,
+                          "bytes":  3217,
+                          "inventory_sha256":  "788fd11023a6a98fed7f4f3b19152bbeda1c4c8858ca5d70adad310e9cd1d8aa",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "runs/token_ar/verification_20261022",
+                          "category":  "test_outputs",
+                          "files":  75,
+                          "bytes":  19751224,
+                          "inventory_sha256":  "921099f3212b42d1f7f101eab8dc66ad3ce178e149598773d3e11b6823dafe06",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "runs/token_ar/verification_final_20261022",
+                          "category":  "test_outputs",
+                          "files":  75,
+                          "bytes":  19751792,
+                          "inventory_sha256":  "95a84ba1d744d3ccc2b45d6b0e9a321a218d8c11c0a03bb9ebd9ec348456346e",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "runs/token_ar/verification_qwen35_20261022",
+                          "category":  "test_outputs",
+                          "files":  79,
+                          "bytes":  21193113,
+                          "inventory_sha256":  "eae97ba4dfd4098996ef39e2d91048f3fcb60008568e576f965e66ed1dd576e6",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "runs/token_ar/verification_qwen3_regression_20261022",
+                          "category":  "test_outputs",
+                          "files":  75,
+                          "bytes":  19753036,
+                          "inventory_sha256":  "92ed0a39da4a2da3c18d061c7ddc32b5b970d583e15624c0a0d0bd8f105f5aec",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "runs/token_ar/qwen35_unit_tests.log",
+                          "category":  "test_outputs",
+                          "files":  1,
+                          "bytes":  10631,
+                          "inventory_sha256":  "1ce962c120a55f5e32928021f6e901dd1653a8846b3d5cc1fb54c31ffc5a9df0",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "runs/token_ar/verification_qwen35_20261022.log",
+                          "category":  "test_outputs",
+                          "files":  1,
+                          "bytes":  9758,
+                          "inventory_sha256":  "35f8d1a2750cfeb90b7a69fac7f416738b4fd58d9ac21381008d7db8b829d999",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  "runs/token_ar/verification_qwen3_regression_20261022.log",
+                          "category":  "test_outputs",
+                          "files":  1,
+                          "bytes":  5274,
+                          "inventory_sha256":  "f98a200ab50373207942353dc42ff0fc8dc01e5ac68807e5b8e5a24fac69c68a",
+                          "deleted":  true
+                      },
+                      {
+                          "path":  ".ruff_cache",
+                          "category":  "cache",
+                          "files":  5,
+                          "bytes":  2018,
+                          "inventory_sha256":  "85e1bc01813557d6e70c958d5fd014288cc07c55124710e930b1a5f73073b7ab",
+                          "deleted":  true
+                      }
+                  ],
+    "planned_files":  323,
+    "planned_bytes":  80597196,
+    "deleted_files":  323,
+    "deleted_bytes":  80597196,
+    "protected_inventory":  {
+                                "data":  {
+                                             "files":  10140,
+                                             "bytes":  1149544191,
+                                             "inventory_sha256":  "611de6a8b9fb77bca4d36387bd3886fe8b1cd6cd9f9abb7676c0b3a2eb93ec09"
+                                         },
+                                "OMOMO":  {
+                                              "files":  17014,
+                                              "bytes":  24672128080,
+                                              "inventory_sha256":  "6c557dc7d0b2950fa662eb5eb2acb2481a26d1e7dd839e511fe1d8e6496a2ee1"
+                                          },
+                                "external":  {
+                                                 "files":  558,
+                                                 "bytes":  161694527,
+                                                 "inventory_sha256":  "c114502eb668f22972f23bc99ebb8129dcbc5391df4021c5dc20be015517846d"
+                                             }
+                            },
+    "validation":  {
+                       "runtime_cli_help_passed":  12,
+                       "retained_document_links_passed":  true,
+                       "no_runtime_imports_of_test_modules":  true,
+                       "cleanup_script_syntax_and_readonly_preview_passed":  true
+                   },
+    "protected_code":  [
+                           {
+                               "path":  ".gitignore",
+                               "sha256":  "40126764cbe4b686d85de467548735e277383027d6b8b4c355d07915929edb51"
+                           },
+                           {
+                               "path":  "configs/token_ar/accelerate_4gpu.yaml",
+                               "sha256":  "1fa8fdf47293d5a1346e017c9017f19b7b3efac2f81a5a575f624e28d2d12ba3"
+                           },
+                           {
+                               "path":  "configs/token_ar/accelerate_qwen35_4gpu.yaml",
+                               "sha256":  "fee45c475f370297bc0ecf1b9a8d2caee6eeb6e929271d7e66ada67634a1770b"
+                           },
+                           {
+                               "path":  "configs/token_ar/qwen35_4b_behave.yaml",
+                               "sha256":  "e2684af697ebf5a3cd3c374b03092be97162da583733a24b2342aec950bc7498"
+                           },
+                           {
+                               "path":  "configs/token_ar/qwen35_4b_omomo.yaml",
+                               "sha256":  "9cf05285a7b00c4408e4230dbc3b54e133ad6a51ce9ce7d83e6b7a88ed3a62b2"
+                           },
+                           {
+                               "path":  "configs/token_ar/qwen3_4b_behave.yaml",
+                               "sha256":  "0acae9053896ba69df2ced38b4365504d4e6639cbf451e6acf2afbd09ff5c532"
+                           },
+                           {
+                               "path":  "configs/token_ar/qwen3_4b_omomo.yaml",
+                               "sha256":  "a550f0dd9516a79426bcd2137380131753396b3ddce8af7c50ec1f31cd6b604d"
+                           },
+                           {
+                               "path":  "configs/token_ar/qwen3_8b_behave.yaml",
+                               "sha256":  "990f52d24105c58914950b5308a16f3aacbe32e0acdfceede7eea86f2267bd56"
+                           },
+                           {
+                               "path":  "configs/token_ar/qwen3_8b_omomo.yaml",
+                               "sha256":  "4ee424fda0df6fee2f66036c3dbba6ef1cb135af6511a287577a2b2272dbe9d2"
+                           },
+                           {
+                               "path":  "configs/token_ar/vq_behave.yaml",
+                               "sha256":  "1c74323778f5d9be363c20190da9a7aa743c528f08dbe7e2715f25c26f9a5449"
+                           },
+                           {
+                               "path":  "configs/token_ar/vq_omomo.yaml",
+                               "sha256":  "59facc214a1893c4a86b26caf9719744aad9e1052289adaf808c0542bf9aa119"
+                           },
+                           {
+                               "path":  "configs/train_behave.yaml",
+                               "sha256":  "59e735f65ea8f57e4eb1a16b937fe081f4827ac475be2c1f743c1fbc983626b3"
+                           },
+                           {
+                               "path":  "configs/train_omomo.yaml",
+                               "sha256":  "6dcd1709728994493803491994806338743297315f8d20799a974825c90fb52f"
+                           },
+                           {
+                               "path":  "configs/unified.yaml",
+                               "sha256":  "2d0f4e4b278e87029dd326c447119bd583259014b93e637ae3687571bb1dead3"
+                           },
+                           {
+                               "path":  "pyproject.toml",
+                               "sha256":  "ef4daecabc30ba06cab94bdb36167d0d94e19646de85717d7caa346d22eda1f2"
+                           },
+                           {
+                               "path":  "src/unified_hoi/__init__.py",
+                               "sha256":  "5ff092f73e4b5448295c8f4afbe4f7d2273cd156befdaf9414b17d50f3ee3b61"
+                           },
+                           {
+                               "path":  "src/unified_hoi/body_metadata.py",
+                               "sha256":  "351f7eac8dc3e32b059e35cab7bcc7576a7a788191252c559954ba942b316287"
+                           },
+                           {
+                               "path":  "src/unified_hoi/data.py",
+                               "sha256":  "a8c020d8d356a7b00ba542469df95ad28914326fa46a731f6c3d250ecdf2ee93"
+                           },
+                           {
+                               "path":  "src/unified_hoi/evaluate.py",
+                               "sha256":  "4c723dd9f6d665a641c2b2aea2e647cdeae5dbb6c41fed3a2b4e3b0ced8c0102"
+                           },
+                           {
+                               "path":  "src/unified_hoi/geometry.py",
+                               "sha256":  "7f134c5d0b09fc117282a122d06cd629a7d8c40570604c80c23e91fabde937a7"
+                           },
+                           {
+                               "path":  "src/unified_hoi/integrations/__init__.py",
+                               "sha256":  "5f2580bc95290ac5f07c6de488e51cf5b841d03936b52a804da481b516d4c35f"
+                           },
+                           {
+                               "path":  "src/unified_hoi/integrations/_tridi_primitives.py",
+                               "sha256":  "1aab1135b2be2eb4cf8cac334bb1177a44d75f3f49aa0fefc213ace1347ee776"
+                           },
+                           {
+                               "path":  "src/unified_hoi/integrations/licenses/TRIDI_LICENSE.txt",
+                               "sha256":  "1fac0cf87b6a07cdf3e0278aee11b9a05db31547dd085b6ffc4ef3a6b85f4c83"
+                           },
+                           {
+                               "path":  "src/unified_hoi/mesh_geometry.py",
+                               "sha256":  "4dd587ff0ec5a6b1c403e5ed079d1c3a3339e7f865d71eb5a3f7db2cc5cd39c5"
+                           },
+                           {
+                               "path":  "src/unified_hoi/model.py",
+                               "sha256":  "8323a7db592d24aaf0653da71fca4e1f6f05f2786fca77ec4109ccdb88c5100d"
+                           },
+                           {
+                               "path":  "src/unified_hoi/parametric/__init__.py",
+                               "sha256":  "ca523286d08756f637e312b86c2e8fc9829e79eb0ef5e185199ffe771df6b21c"
+                           },
+                           {
+                               "path":  "src/unified_hoi/parametric/body.py",
+                               "sha256":  "d7b8c3691da295730959065b4b92f7c501e27f401cc79330374f4d1d110932aa"
+                           },
+                           {
+                               "path":  "src/unified_hoi/parametric/contact.py",
+                               "sha256":  "c09d85f5ed67111b5b0f2bef0751521c0542a29771d22df2e03f2d7e6f17763e"
+                           },
+                           {
+                               "path":  "src/unified_hoi/parametric/contact_supervision.py",
+                               "sha256":  "d01d007540b4b276dcdf0df15e47562c17209226240876c7a5f2fc836fd1afdc"
+                           },
+                           {
+                               "path":  "src/unified_hoi/parametric/data.py",
+                               "sha256":  "b5f518625366cddf75636d2a275d34cd6fa762cbe50ab3155f1072c1dbdbff24"
+                           },
+                           {
+                               "path":  "src/unified_hoi/parametric/diffusion.py",
+                               "sha256":  "d96a8626cce77ef525504eecd661463d8b2a288f2fd3bf394be8edc3793cda8f"
+                           },
+                           {
+                               "path":  "src/unified_hoi/parametric/evaluate.py",
+                               "sha256":  "52942bbc20d79aea4d3604ccf09a69ef8df30bade5396e01456c5e82079ffe4f"
+                           },
+                           {
+                               "path":  "src/unified_hoi/parametric/evaluation_protocol.py",
+                               "sha256":  "86efbebfdb9c4c555a5f8cf7a4cdcfeecd3e0c99978d9e9c4cef3df7c2e8f1d5"
+                           },
+                           {
+                               "path":  "src/unified_hoi/parametric/model.py",
+                               "sha256":  "7ae16c841cb31082126c5c0041cd4f94a3290f3d61a9c24851cc3cc7d12146c9"
+                           },
+                           {
+                               "path":  "src/unified_hoi/parametric/sample.py",
+                               "sha256":  "983f5bbc9d043d5fa323c18a1915dde45033d1b1bc10f88a09f7993fff8a961c"
+                           },
+                           {
+                               "path":  "src/unified_hoi/parametric/train.py",
+                               "sha256":  "529272fb357a07283e99b0d38654fc7726956be13bd1280ba90aebdebf2a62e6"
+                           },
+                           {
+                               "path":  "src/unified_hoi/runtime.py",
+                               "sha256":  "5a47f77ff43fb463fdf0fcb5d356ce7d78815622748562fa6ce0c38d01c47ac8"
+                           },
+                           {
+                               "path":  "src/unified_hoi/sample.py",
+                               "sha256":  "d04562ff6585c23c41b6bd00b9fe347ecd4efef66541a6bac7943abb97407b25"
+                           },
+                           {
+                               "path":  "src/unified_hoi/smpl_mesh.py",
+                               "sha256":  "a6a5f04194442d2be8038d77d03294e1addd44b2a54b5c3c8b2ec3b0fe2ec5ba"
+                           },
+                           {
+                               "path":  "src/unified_hoi/token_ar/__init__.py",
+                               "sha256":  "aa48967513ac04a0db311046f82828eb8c1db8ce979e308e1c684aefbc88916d"
+                           },
+                           {
+                               "path":  "src/unified_hoi/token_ar/body.py",
+                               "sha256":  "d7b8c3691da295730959065b4b92f7c501e27f401cc79330374f4d1d110932aa"
+                           },
+                           {
+                               "path":  "src/unified_hoi/token_ar/checkpoint.py",
+                               "sha256":  "14123cb29a914c86d764e60fa942a6678cb32798e8e64b6bbea6d3bdc29f5975"
+                           },
+                           {
+                               "path":  "src/unified_hoi/token_ar/codecs.py",
+                               "sha256":  "135653b9114adba1fc11d443dfac49db6cc9f59ef618eaa4b475b2a7bbdab859"
+                           },
+                           {
+                               "path":  "src/unified_hoi/token_ar/data.py",
+                               "sha256":  "053bc24a8f22b6641d641d0137bfe7d25bb6a5533dbcc323002e81ba0d4d0256"
+                           },
+                           {
+                               "path":  "src/unified_hoi/token_ar/evaluate.py",
+                               "sha256":  "9514db06143ea37edda633b5a5926d8fc6948b1b0ef59475d9d6db6e420130d9"
+                           },
+                           {
+                               "path":  "src/unified_hoi/token_ar/evaluation_protocol.py",
+                               "sha256":  "86efbebfdb9c4c555a5f8cf7a4cdcfeecd3e0c99978d9e9c4cef3df7c2e8f1d5"
+                           },
+                           {
+                               "path":  "src/unified_hoi/token_ar/metrics.py",
+                               "sha256":  "cea5549d980c9e1aca9ef39280e91e5e198dedecf6078b551ab78ee43e3a7f0e"
+                           },
+                           {
+                               "path":  "src/unified_hoi/token_ar/model.py",
+                               "sha256":  "b7ed15aac6f805c03d6f61c970edbfb1b5bf25ab3ab5ba6c8336c61520e91d8c"
+                           },
+                           {
+                               "path":  "src/unified_hoi/token_ar/native_data.py",
+                               "sha256":  "0268281470298734591302bb39c2a370dc9350e57a98f89f41a28cf2884586e7"
+                           },
+                           {
+                               "path":  "src/unified_hoi/token_ar/sample.py",
+                               "sha256":  "0b02a9687082a849b0b6001bea6196534356b4c63f4f9e9b84dca9eb8809941f"
+                           },
+                           {
+                               "path":  "src/unified_hoi/token_ar/sequence.py",
+                               "sha256":  "ae044d268ecbca3dd3011aedc1dc1fe9fc6e8d40322b1ed2bba7d6c8b25017c6"
+                           },
+                           {
+                               "path":  "src/unified_hoi/token_ar/train.py",
+                               "sha256":  "5d328d19d3f65bb2b723fd4bcc368c7803fc0dc1581e6ebcc81920e72ff92c56"
+                           },
+                           {
+                               "path":  "src/unified_hoi/token_ar/train_codecs.py",
+                               "sha256":  "fb96ba2c14c75a62c415eddae58e90c855a86d4a4bf825bd45792452dfc64b03"
+                           },
+                           {
+                               "path":  "src/unified_hoi/train.py",
+                               "sha256":  "8596d7f96d8b73f5cb653a757c4f9e26de889563825b4a20f8d638d1ff816e0a"
+                           }
+                       ],
+    "retained_documents_and_tools":  [
+                                         {
+                                             "path":  "AGENTS.md",
+                                             "sha256":  "0855c7c9f63ccfe45098119fbca5525ccd603b6473eb89c3d408c3b4043d2077"
+                                         },
+                                         {
+                                             "path":  "data/README.md",
+                                             "sha256":  "9d3930060cca97c3b4d8315caf21fd090c063b1192a0f2424c82638c6ee7f7bf"
+                                         },
+                                         {
+                                             "path":  "docs/EVALUATION.md",
+                                             "sha256":  "3898f87dba52c53164abb33ed2a03ec04f753f25e78cc4a587e60fa84ab7fd08"
+                                         },
+                                         {
+                                             "path":  "docs/PARAMETRIC_RETRAINING.md",
+                                             "sha256":  "521270dd4a1214db9e0836e2828ab624427765df21f39dd4449f5f6fd14e621f"
+                                         },
+                                         {
+                                             "path":  "docs/TOKEN_AR.md",
+                                             "sha256":  "754500b2e7f2bdfcc3c205ab752ee6f8a537e695596f943d248ee71d35e95301"
+                                         },
+                                         {
+                                             "path":  "docs/TOKEN_AR_ORIGIN.json",
+                                             "sha256":  "f7c9b4f04c0ebafa267294433723d04ea7100c5268e8d3832141fd17a4a26396"
+                                         },
+                                         {
+                                             "path":  "docs/UPSTREAM.md",
+                                             "sha256":  "67e2672ad63a2eb08715000776ddc468ba70725a279298b7e803e819aa238ac4"
+                                         },
+                                         {
+                                             "path":  "README.md",
+                                             "sha256":  "ee4513b8724b921cc2ccd3d4577750d22a0a22b9716ceed601bb9d5ed3fcd6c6"
+                                         },
+                                         {
+                                             "path":  "scripts/benchmark.py",
+                                             "sha256":  "c65bd8f8188ad93613a2fd1fbce5a891ec61c55c55b04e356aa72e7c672b37fa"
+                                         },
+                                         {
+                                             "path":  "scripts/cache_text.py",
+                                             "sha256":  "238e20bcb6a009032b563140a1d08026c05c87cfad92c7c259ddb42bed41673a"
+                                         },
+                                         {
+                                             "path":  "scripts/cleanup_tests_docs.ps1",
+                                             "sha256":  "ed532c7532ecedb31bea80451f6e3978db882b62f3657f1638f79cd0075e1b4f"
+                                         },
+                                         {
+                                             "path":  "scripts/compare_evaluations.py",
+                                             "sha256":  "2509e739241e8a579e4693a277fde27d6e992b8baa1a659d21f52881868c8e08"
+                                         },
+                                         {
+                                             "path":  "scripts/prepare_parametric.py",
+                                             "sha256":  "e56b2d89ce08ef959b9d0bfda45ab8b2fd8873888ffc1615e0f562815bd2722a"
+                                         }
+                                     ],
+    "post_cleanup_verified":  true
+}

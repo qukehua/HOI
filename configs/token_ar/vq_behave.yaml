@@ -1,0 +1,24 @@
+architecture: token_ar_v1
+dataset: behave
+manifest: data/processed/behave_parametric.jsonl
+contact_support: data/parametric_assets/behave/contact_support.npz
+seed: 42
+cpu_threads: 4
+window: 120
+stride: 60
+output: runs/token_ar/behave/vq
+device: cuda:0
+batch_size: 32
+max_steps: 100000
+learning_rate: 0.0002
+validate_every: 1000
+validation_batches: 16
+log_every: 20
+reset_unused_every: 100
+codec:
+  codebook_size: 512
+  latent_dim: 128
+  width: 256
+  stride: 2
+  commitment_weight: 0.25
+  velocity_weight: 0.1

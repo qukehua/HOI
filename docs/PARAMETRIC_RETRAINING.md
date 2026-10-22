@@ -32,7 +32,7 @@ H的顺序是 `[betas, local_rot6d[52], transl]`，旋转6D存矩阵前两**行*
 
 训练只用train拟合归一化与AE。AE结构是690→512→256→128→256→512→690，与TriDi的层尺寸一致；使用加权BCE，独立训练3000步，val选检查点和概率阈值。官方接触权重下载服务在本次访问返回503，因此这里没有加载官方权重，也不声称两个latent空间相同。两套AE训练得到不同坐标系，严禁互换。
 
-验证在val中均匀抽取固定窗口，默认8个、DDIM50步：
+验证在val中均匀抽取固定窗口，默认8个、DDIM50步；新配置按1fps评分且不使用文本，与默认测试协议一致。详见 [统一评估](EVALUATION.md)：
 
 - `best_010.pt`：按mode010的OBJ_V2V选择。
 - `best_100.pt`：按mode100的MPJPE选择。
@@ -104,9 +104,9 @@ python scripts/benchmark.py \
   --device cuda:0 --save-predictions --output runs/eval_omomo_parametric
 ```
 
-上述是单样本、无文本条件的010/100；需要文本时显式加 `--text-conditioned`，缺失缓存会报错。生成接触用 `--modes 011 101`，保持其他设置一致。评估结果分逐窗口JSONL、按窗口平均和按帧加权平均；与原TriDi逐帧平均比较时使用 `frame_weighted_mean`。
+上述是单样本、无文本条件的010/100；需要文本时显式加 `--text-conditioned`，缺失缓存会报错。生成接触用 `--modes 011 101`，只与baseline同模式比较。`--profile tridi`默认1fps评分，但保持原始序列帧率生成。主结果在`summary.json.reconstruction`，使用逐帧平均和全局接触F1；窗口平均仅作诊断。分别使用best_010/best_100及缓存复评的命令见 [统一评估说明](EVALUATION.md)。
 
-**这些命令对齐的是重建指标公式和输出语义，不是完整论文表格复现。** 当前仍采用本项目的10fps、片段划分、窗口、过滤过的刚体对象和独立训练的接触AE；OMOMO原始fps假设仍保留旧流水线限制。新路径尚未接入1-NNA/COV/MMD/SD等generation分布指标。报告中 `directly_comparable_to_paper_table=false`，在统一split、帧选择、采样预算及模型选择协议前，不直接对原论文数字宣称领先。
+**这些命令对齐的是指标公式和输出语义，不是完整论文表格复现。** 当前仍采用本项目的片段划分、窗口、过滤过的刚体对象和独立接触AE；OMOMO原始fps假设仍保留旧流水线限制。现已接入1-NNA/COV/MMD/SD，其中MMD/SD按TriDi默认FAISS的平方距离计算。报告中仍保留`directly_comparable_to_paper_table=false`，在统一split、实际源帧、坐标预处理、采样预算及模型选择协议前，不直接与原论文数字比较。
 
 ## 单条采样、重新评估和完整网格
 

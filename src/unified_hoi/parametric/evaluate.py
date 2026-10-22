@@ -1,5 +1,6 @@
 """Native SMPL-H / SMPL-X metrics with matched 73-joint semantics and surface contacts."""
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -12,9 +13,11 @@ from ..data import read_manifest
 from ..mesh_geometry import load_mesh_asset
 from ..geometry import rotation6d_to_matrix
 from ..runtime import move_batch, write_json
-from .body import BodyGeometry, legacy_to_parameters, human_dim
+from .body import BodyGeometry, legacy_to_parameters, human_dim, digest_file
 from .data import ParametricDataset, load_record
 from .diffusion import controls_for
+from .evaluation_protocol import (MODE_DESCRIPTIONS, protocol_options, frame_plan,
+                                  window_selection, aggregate_reports, fingerprint)
 
 
 def rotation_matrices(state):
@@ -40,10 +43,13 @@ def similarity(source, target):
 
 def contact_scores(pred, target):
     pred, target = np.asarray(pred, bool), np.asarray(target, bool)
+    if pred.shape != target.shape or not pred.size:
+        raise ValueError("Contact predictions and targets must have the same nonempty shape")
     tp, fp, fn = int((pred & target).sum()), int((pred & ~target).sum()), int((~pred & target).sum())
     return {"accuracy_percent": float(100 * (pred == target).mean()),
             "precision": tp / max(tp + fp, 1), "recall": tp / max(tp + fn, 1),
-            "f1": 2 * tp / max(2 * tp + fp + fn, 1), "TP": tp, "FP": fp, "FN": fn}
+            "f1": 2 * tp / max(2 * tp + fp + fn, 1), "TP": tp, "FP": fp, "FN": fn,
+            "TN": int((~pred & ~target).sum())}
 
 
 def generation_feature_kind(mode):
@@ -58,11 +64,16 @@ def generation_feature_kind(mode):
     raise ValueError(f"generation metrics need a human and/or object target; got mode {mode}")
 
 
-def object_pose_features(pose):
+def object_pose_features(pose, vertices=None, origin=None):
     """TriDi object_pose feature: flattened rotation matrix + center, [T,12]."""
     pose = np.asarray(pose, np.float64)
-    rotation = rotation_matrices(pose).reshape(len(pose), 9)
-    return np.concatenate([rotation, pose[:, :3]], -1).astype(np.float32)
+    rotation = rotation_matrices(pose)
+    center = pose[:, :3].copy()
+    if vertices is not None:
+        center += np.einsum("tij,j->ti", rotation, np.asarray(vertices).mean(0))
+    if origin is not None:
+        center -= origin
+    return np.concatenate([rotation.reshape(len(pose), 9), center], -1).astype(np.float32)
 
 
 def human_joint_features(joints):
@@ -72,65 +83,79 @@ def human_joint_features(joints):
     return relative[:, 1:].reshape(len(joints), -1).astype(np.float32)
 
 
-def generation_features(kind, joints=None, object_pose=None):
+def generation_features(kind, joints=None, object_pose=None, *, vertices=None, coordinate_frame="native"):
+    if coordinate_frame not in ("native", "pelvis"):
+        raise ValueError("Unknown generation feature coordinates")
+    origin = None if coordinate_frame == "native" else np.asarray(joints)[:, 0]
     if kind == "object_pose":
-        return object_pose_features(object_pose)
+        return object_pose_features(object_pose, vertices, origin)
     if kind == "human_joints":
         return human_joint_features(joints)
     if kind == "human_joints_object_pose":
-        return np.concatenate([human_joint_features(joints), object_pose_features(object_pose)], -1)
+        return np.concatenate([human_joint_features(joints), object_pose_features(object_pose, vertices, origin)], -1)
     raise ValueError(f"unknown generation feature kind: {kind}")
 
 
 def generation_metrics(generated, reference_test, reference_train):
     """TriDi Quality of Generated Distribution: 1-NNA / COV / MMD / SD."""
-    from sklearn.neighbors import NearestNeighbors
-
     generated = np.asarray(generated, np.float32)
     reference_test = np.asarray(reference_test, np.float32)
     reference_train = np.asarray(reference_train, np.float32)
     if min(len(generated), len(reference_test), len(reference_train)) < 1:
         raise ValueError("generation metrics require nonempty generated/test/train features")
+    if (any(a.ndim != 2 or not np.isfinite(a).all() for a in (generated, reference_test, reference_train))
+            or len({a.shape[1] for a in (generated, reference_test, reference_train)}) != 1
+            or generated.shape[1] == 0 or len(generated) != len(reference_test)):
+        raise ValueError("Need finite, matching feature dimensions and equal generated/reference counts")
     # COV: generated → test coverage of unique NN hits.
-    test_nn = NearestNeighbors(n_neighbors=1, algorithm="kd_tree", metric="l2").fit(reference_test)
-    _, cov_idx = test_nn.kneighbors(generated)
-    cov = float(len(np.unique(cov_idx[:, 0])) / len(reference_test))
-    # MMD: test → generated mean NN distance.
-    gen_nn = NearestNeighbors(n_neighbors=1, algorithm="kd_tree", metric="l2").fit(generated)
-    mmd_dist, _ = gen_nn.kneighbors(reference_test)
-    mmd = float(mmd_dist.mean())
-    # SD: generated → train mean NN distance.
-    train_nn = NearestNeighbors(n_neighbors=1, algorithm="kd_tree", metric="l2").fit(reference_train)
-    sd_dist, _ = train_nn.kneighbors(generated)
-    sd = float(sd_dist.mean())
+    _, cov_idx = cKDTree(reference_test).query(generated, workers=4)
+    cov = float(len(np.unique(cov_idx)) / len(reference_test))
+    # FAISS IndexFlatL2 in official TriDi returns SQUARED Euclidean distances.
+    mmd_dist, _ = cKDTree(generated).query(reference_test, workers=4)
+    mmd = float(np.square(mmd_dist).mean())
+    sd_dist, _ = cKDTree(reference_train).query(generated, workers=4)
+    sd = float(np.square(sd_dist).mean())
     # 1-NNA: leave-one-out in the pooled generated+test set (label=1 generated).
     pooled = np.concatenate([generated, reference_test], 0)
     labels = np.concatenate([np.ones(len(generated), np.int64), np.zeros(len(reference_test), np.int64)])
-    pool_nn = NearestNeighbors(n_neighbors=2, algorithm="kd_tree", metric="l2").fit(pooled)
-    _, idx = pool_nn.kneighbors(pooled)
-    neighbor = labels[idx[:, 1]]
+    _, idx = cKDTree(pooled).query(pooled, k=2, workers=4)
+    # With duplicate vectors, the query itself need not be neighbor zero.
+    other = np.where(idx[:, 0] == np.arange(len(pooled)), idx[:, 1], idx[:, 0])
+    neighbor = labels[other]
     nna = float((neighbor == labels).mean())
-    return {"1-NNA": nna, "COV": cov, "MMD": mmd, "SD": sd,
+    return {"1-NNA": nna, "COV": cov, "MMD": mmd, "SD": sd, "distance": "squared_l2",
             "feature_frames_generated": int(len(generated)),
             "feature_frames_test": int(len(reference_test)),
             "feature_frames_train": int(len(reference_train))}
 
 
-def collect_split_features(manifest, split, dataset, support_hash, window, kind, geometry, device="cpu"):
+def collect_split_features(manifest, split, dataset, support_hash, window, kind, geometry, device="cpu",
+                           target_fps=10., coordinate_frame="pelvis"):
     """Build TriDi-style per-frame features from a parametric split (no sampling)."""
-    rows = []
+    rows, frame_ids = [], []
     data = ParametricDataset(manifest, split, dataset, support_hash, window, text_condition=False, text_dim=512)
+    plan = frame_plan(data.records, target_fps)
     for batch in DataLoader(data, batch_size=1):
+        index, start = int(batch["record_index"][0]), int(batch["window_start"][0])
+        end = start + int(batch["valid_frames"].sum())
+        selected, ids = window_selection(plan[index], start, end)
+        if not len(selected):
+            continue
         batch = move_batch(batch, device)
-        valid = batch["valid_frames"][0]
+        valid = torch.as_tensor(selected, device=device)
         with torch.no_grad():
             _, joints = geometry(batch["human"][:, valid], batch["gender"])
         joints = joints[0].detach().cpu().numpy()
         pose = batch["object"][0, valid].detach().cpu().numpy()
-        rows.append(generation_features(kind, joints=joints, object_pose=pose))
+        entry = data.records[index]
+        vertices, _ = load_mesh_asset(str(Path(entry["object_mesh_path"]).resolve()))
+        rows.append(generation_features(kind, joints=joints, object_pose=pose,
+                                       vertices=vertices * entry["object_mesh_scale"],
+                                       coordinate_frame=coordinate_frame))
+        frame_ids.extend(ids)
     if not rows:
         raise ValueError(f"No {split} windows for generation features")
-    return np.concatenate(rows, 0)
+    return np.concatenate(rows, 0), fingerprint(sorted(frame_ids))
 
 
 def mesh_contacts(body_vertices, object_pose, object_vertices):
@@ -141,13 +166,19 @@ def mesh_contacts(body_vertices, object_pose, object_vertices):
 
 
 @torch.no_grad()
-def reconstruction(states, batch, geometry, mode, vertices, codec=None, threshold=.5):
+def reconstruction(states, batch, geometry, mode, vertices, codec=None, threshold=.5, frame_indices=None):
     if mode not in ("100", "010", "001", "110", "101", "011", "111"):
         raise ValueError("Invalid generated-bit evaluation mode")
     for key, bit in zip(("human", "object"), mode):
         if bit == "0" and not torch.allclose(states[key], batch[key], atol=1e-5, rtol=0):
             raise ValueError(f"Observed {key} was altered before evaluation")
     valid = batch["valid_frames"][0]
+    if frame_indices is not None:
+        selected = torch.as_tensor(frame_indices, device=valid.device, dtype=torch.long)
+        if (not len(selected) or selected.min() < 0 or selected.max() >= len(valid)
+                or len(selected.unique()) != len(selected) or not valid[selected].all()):
+            raise ValueError("Invalid or padded evaluation frame indices")
+        valid = torch.zeros_like(valid).scatter_(0, selected, True)
     gender = batch["gender"]
     pv, pj = geometry(states["human"][:, valid], gender)
     gv, gj = geometry(batch["human"][:, valid], gender)
@@ -190,6 +221,7 @@ def reconstruction(states, batch, geometry, mode, vertices, codec=None, threshol
     for k, value in details.items():
         for name in ("precision", "recall", "f1"):
             scores[k + "_" + name.upper()] = value[name]
+    scores["CONTACT_ALL_NEGATIVE_ACCURACY"] = float(100 * (~gt_contact).mean())
     return {"metrics": scores, "details": details, "frames": len(po), "dataset": geometry.dataset,
             "body_model": "smplh" if geometry.dataset == "behave" else "smplx",
             "evaluation_joints": 73, "contact_vertices": 690, "support_sha256": geometry.support_hash,
@@ -253,46 +285,126 @@ def evaluate_legacy(prediction, reference, manifest, support, hands, mode, start
     return report
 
 
+def _cached_states(path, batch, geometry, saved, record, mode, start, device, checkpoint_hash):
+    with np.load(path, allow_pickle=False) as archive:
+        pred = dict(archive)
+    expected = dict(representation="parametric_v1", dataset=geometry.dataset, mode=mode,
+                    sequence_id=str(record["sequence_id"]), window_start=start,
+                    gender=str(record["gender"]), body_model_sha256=str(record["body_model_sha256"]),
+                    support_sha256=geometry.support_hash,
+                    codec_sha256=saved["codec_metadata"]["file_sha256"])
+    for key, value in expected.items():
+        if str(pred.get(key)) != str(value):
+            raise ValueError(f"Cached prediction mismatch: {path}: {key}")
+    if "checkpoint_sha256" in pred and str(pred["checkpoint_sha256"]) != checkpoint_hash:
+        raise ValueError(f"Cached prediction checkpoint hash differs: {path}")
+    n = int(batch["valid_frames"].sum())
+    if (pred["timestamps"].shape != (n,) or not np.allclose(
+            pred["timestamps"], record["timestamps"][start:start + n], atol=1e-6, rtol=0)):
+        raise ValueError(f"Cached prediction timestamps/window mismatch: {path}")
+    states = {}
+    for key, source in (("human", "human_params"), ("object", "object"), ("contact", "contact_latent")):
+        value = pred[source]
+        if value.shape != (n, batch[key].shape[-1]) or not np.isfinite(value).all():
+            raise ValueError(f"Invalid cached {source}: {path}")
+        states[key] = batch[key].clone()
+        states[key][0, :n] = torch.as_tensor(value, device=device)
+    masks = controls_for(batch, geometry.dataset, mode)
+    for key, mask in masks.items():
+        if not torch.allclose(states[key][mask], batch[key][mask], atol=1e-5, rtol=0):
+            raise ValueError(f"Cached prediction changed observed {key}: {path}")
+    return states
+
+
 def benchmark(checkpoint, manifest, output, *, modes=("010", "100"), window=120, steps=50,
-              seed=42, device="cpu", limit=None, text_conditioned=False, save_predictions=False):
+              seed=42, device="cpu", limit=None, text_conditioned=False, save_predictions=False,
+              profile="tridi", eval_fps=None, train_reference_fps=None, generation_frame="pelvis",
+              split="test", predictions_dir=None):
     from .train import load_run, prepare_batch
     from .diffusion import MODES
-    if not modes or any(mode not in MODES for mode in modes) or (limit is not None and limit < 1):
-        raise ValueError("Specify valid native modes and a positive limit")
-    model, diffusion, geometry, saved = load_run(checkpoint, device)
-    config = saved["config"]
-    dataset = ParametricDataset(manifest, "test", config["dataset"], geometry.support_hash, window,
-                                text_condition=text_conditioned, text_dim=model.config.text_dim)
-    if not len(dataset):
-        raise ValueError("No test windows")
+    if (not modes or any(mode not in MODES for mode in modes) or len(set(modes)) != len(modes)
+            or (limit is not None and limit < 1) or split not in ("val", "test")):
+        raise ValueError("Specify distinct native modes, val/test split and a positive limit")
+    protocol = protocol_options(profile, eval_fps, train_reference_fps, generation_frame)
     output = Path(output)
     if output.exists():
         raise FileExistsError(output)
+    checkpoint_hash = digest_file(checkpoint)
+    cached = None
+    if predictions_dir is not None:
+        predictions_dir = Path(predictions_dir)
+        cached = json.loads((predictions_dir / "summary.json").read_text(encoding="utf-8"))
+        for key, value in (("steps", steps), ("seed", seed), ("text_conditioned", text_conditioned)):
+            if cached.get(key) != value:
+                raise ValueError(f"Cached sampling setting differs: {key}")
+        if cached.get("window", window) != window or cached.get("split", "test") != split:
+            raise ValueError("Cached window/split differs")
+        if cached.get("checkpoint_sha256"):
+            if cached["checkpoint_sha256"] != checkpoint_hash:
+                raise ValueError("Cached predictions belong to a different checkpoint")
+        elif str(cached.get("checkpoint", "")).replace(chr(92), "/").split("/")[-1] != Path(checkpoint).name:
+            raise ValueError("Legacy cache checkpoint name differs; cannot verify prediction provenance")
+    model, diffusion, geometry, saved = load_run(checkpoint, device)
+    config = saved["config"]
+    if not 1 <= steps <= diffusion.steps:
+        raise ValueError("Sampling steps outside checkpoint schedule")
+    dataset = ParametricDataset(manifest, split, config["dataset"], geometry.support_hash, window,
+                                text_condition=text_conditioned, text_dim=model.config.text_dim)
+    if not len(dataset):
+        raise ValueError("No evaluation windows")
+    plan = frame_plan(dataset.records, protocol["eval_fps"])
     output.mkdir(parents=True)
-    reports, features, gen_bags = [], {}, {}
+    reports, gen_bags, ids, mesh_hashes = {}, {}, [], {}
+    reference_digest = hashlib.sha256()
     for index, batch in enumerate(DataLoader(dataset, batch_size=1)):
         if limit is not None and index >= limit:
             break
+        ri, start = int(batch["record_index"][0]), int(batch["window_start"][0])
+        n = int(batch["valid_frames"].sum())
+        selected, frame_ids = window_selection(plan[ri], start, start + n)
+        if not len(selected):
+            continue
         batch = prepare_batch(model, move_batch(batch, device), geometry, diffusion.steps)
         if text_conditioned and not batch["text_available"].all():
             raise ValueError("Missing text condition")
-        entry = dataset.records[int(batch["record_index"][0])]
+        entry = dataset.records[ri]
+        record = load_record(entry["path"])
         vertices, _ = load_mesh_asset(str(Path(entry["object_mesh_path"]).resolve()))
         vertices = vertices * entry["object_mesh_scale"]
+        mesh_path = str(Path(entry["object_mesh_path"]).resolve())
+        if mesh_path not in mesh_hashes:
+            mesh_hashes[mesh_path] = digest_file(mesh_path)
+        reference_digest.update(fingerprint([mesh_hashes[mesh_path], entry["object_mesh_scale"]]).encode())
+        ids.extend(frame_ids)
+        valid = torch.as_tensor(selected, device=device)
+        for key in ("human", "object", "surface_contact"):
+            reference_digest.update(batch[key][0, valid].cpu().numpy().astype("<f4").tobytes())
+        frame_row = dict(window_index=index, sequence_id=str(record["sequence_id"]),
+                         source_sequence_id=plan[ri]["source_sequence_id"], window_start=start,
+                         input_frames=n, source_fps=plan[ri]["source_fps"], frame_ids=frame_ids,
+                         selected_local_indices=selected.tolist(), timestamps=record["timestamps"][start + selected].tolist())
+        with (output / "evaluation_frames.jsonl").open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(frame_row) + "\n")
+        with torch.no_grad():
+            _, gt_joints = geometry(batch["human"][:, valid], batch["gender"])
+        gt_joints = gt_joints[0].cpu().numpy()
         for mode in modes:
-            masks = controls_for(batch, config["dataset"], mode)
-            state = diffusion.sample(model, batch, masks, steps, seed + index * 1009)
-            report = reconstruction(state, batch, geometry, mode, vertices, model.codec, float(model.contact_threshold))
-            report.update(mode=mode, sequence_id=batch["sequence_id"][0], window_start=int(batch["window_start"][0]))
-            reports.append(report)
+            if predictions_dir is None:
+                masks = controls_for(batch, config["dataset"], mode)
+                state = diffusion.sample(model, batch, masks, steps, seed + index * 1009)
+            else:
+                state = _cached_states(predictions_dir / mode / f"{index:06d}.npz", batch,
+                                       geometry, saved, record, mode, start, device, checkpoint_hash)
+            report = reconstruction(state, batch, geometry, mode, vertices, model.codec,
+                                    float(model.contact_threshold), frame_indices=selected)
+            report.update(mode=mode, mode_description=MODE_DESCRIPTIONS[mode],
+                          sequence_id=str(record["sequence_id"]), window_start=start,
+                          input_frames=n, selected_local_indices=selected.tolist())
             with (output / "per_clip.jsonl").open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps(report, allow_nan=False) + "\n")
             if save_predictions:
                 folder = output / mode
                 folder.mkdir(exist_ok=True)
-                n = report["frames"]
-                record = load_record(entry["path"])
-                start = int(batch["window_start"][0])
                 np.savez_compressed(folder / f"{index:06d}.npz", human_params=state["human"][0, :n].cpu().numpy(),
                                     object=state["object"][0, :n].cpu().numpy(), contact_latent=state["contact"][0, :n].cpu().numpy(),
                                     contact_probability=model.codec.decode(state["contact"])[0, :n].cpu().numpy(),
@@ -300,55 +412,66 @@ def benchmark(checkpoint, manifest, output, *, modes=("010", "100"), window=120,
                                     representation="parametric_v1", mode=mode, gender=record["gender"],
                                     window_start=start, sequence_id=record["sequence_id"],
                                     body_model_type=record["body_model_type"],
-                                    body_model_sha256=record["body_model_sha256"],
-                                    codec_sha256=saved["codec_metadata"]["file_sha256"],
-                                    support_sha256=geometry.support_hash)
-            features.setdefault(mode, []).append(report)
-            # Collect TriDi generation features on valid frames (generated vs GT reference).
+                                    body_model_sha256=record["body_model_sha256"], checkpoint_sha256=checkpoint_hash,
+                                    codec_sha256=saved["codec_metadata"]["file_sha256"], support_sha256=geometry.support_hash)
+            reports.setdefault(mode, []).append(report)
             if mode[0] == "1" or mode[1] == "1":
                 kind = generation_feature_kind(mode)
-                valid = batch["valid_frames"][0]
                 with torch.no_grad():
                     _, pred_joints = geometry(state["human"][:, valid], batch["gender"])
-                    _, gt_joints = geometry(batch["human"][:, valid], batch["gender"])
-                pred_joints = pred_joints[0].detach().cpu().numpy()
-                gt_joints = gt_joints[0].detach().cpu().numpy()
-                pred_obj = state["object"][0, valid].detach().cpu().numpy()
-                gt_obj = batch["object"][0, valid].detach().cpu().numpy()
                 bag = gen_bags.setdefault(mode, {"kind": kind, "generated": [], "reference": []})
-                bag["generated"].append(generation_features(kind, joints=pred_joints, object_pose=pred_obj))
-                bag["reference"].append(generation_features(kind, joints=gt_joints, object_pose=gt_obj))
+                for name, joints, pose in (("generated", pred_joints[0].cpu().numpy(), state["object"]),
+                                          ("reference", gt_joints, batch["object"])):
+                    bag[name].append(generation_features(kind, joints=joints,
+                        object_pose=pose[0, valid].cpu().numpy(), vertices=vertices,
+                        coordinate_frame=protocol["generation_frame"]))
         print(f"Evaluated native window {index + 1}/{min(limit or len(dataset), len(dataset))}", flush=True)
-    summary = {"dataset": config["dataset"], "checkpoint": str(checkpoint), "steps": steps, "seed": seed,
+    if not reports:
+        raise ValueError("No frames selected; increase --limit or change --eval-fps")
+    summary = {"dataset": config["dataset"], "checkpoint": str(checkpoint), "checkpoint_sha256": checkpoint_hash,
+               "checkpoint_step": saved.get("step"), "steps": steps, "seed": seed, "window": window,
+               "split": split, "limit_windows": limit, "sampler": "DDIM_eta0",
                "text_conditioned": text_conditioned, "single_sample": True, "support_sha256": geometry.support_hash,
+               "body_assets_sha256": saved["geometry_provenance"]["models"],
                "codec_origin": saved["codec_metadata"]["origin"], "metrics": {}, "generation": {},
-               "directly_comparable_to_paper_table": False}
-    for mode, rows in features.items():
-        summary["metrics"][mode] = {key: {"macro_mean_per_window": float(np.mean([r["metrics"][key] for r in rows])),
-                                             "frame_weighted_mean": float(np.average([r["metrics"][key] for r in rows],
-                                                                    weights=[r["frames"] for r in rows]))}
-                                     for key in rows[0]["metrics"]}
-    if gen_bags:
-        print("Computing TriDi generation metrics...", flush=True)
-        for mode, bag in gen_bags.items():
-            kind = bag["kind"]
-            generated = np.concatenate(bag["generated"], 0)
-            reference = np.concatenate(bag["reference"], 0)
-            train = collect_split_features(manifest, "train", config["dataset"], geometry.support_hash,
-                                           window, kind, geometry, device=device)
-            scores = generation_metrics(generated, reference, train)
-            scores["feature_kind"] = kind
-            scores["mode_description"] = {"101": "H,I|O", "011": "O,I|H", "100": "H|O,I", "010": "O|H,I",
-                                          "110": "H,O|I", "111": "H,O,I"}.get(mode, mode)
-            summary["generation"][mode] = scores
-            print(f"  mode {mode} ({scores['mode_description']}): "
-                  f"1-NNA={scores['1-NNA']:.4f} COV={scores['COV']:.4f} "
-                  f"MMD={scores['MMD']:.4f} SD={scores['SD']:.4f}", flush=True)
+               "reconstruction": {}, "contact_micro": {}, "protocol": protocol,
+               "modes": {m: MODE_DESCRIPTIONS[m] for m in modes}, "evaluated_frames": len(ids),
+               "evaluation_frames_sha256": fingerprint(sorted(ids)),
+               "reference_values_sha256": reference_digest.hexdigest(), "reference_train_frames_sha256": None,
+               "prediction_source": "cached" if cached is not None else "sampled",
+               "cached_checkpoint_sha256_verified": bool(cached and cached.get("checkpoint_sha256")),
+               "checkpoint_validation_text_conditioned": config.get("validation_text_condition", config.get("text_condition", True)),
+               "checkpoint_validation_fps": config.get("validation_fps", 0.),
+               "directly_comparable_to_paper_table": False,
+               "comparison_limits": ["Native manifest split, objects and sequence windows must match the baseline",
+                   "First available source frame is the sampling origin; not guaranteed to match official raw timestamps",
+                   "Pelvis centering does not reproduce unknown baseline axis/object-template rotations",
+                   "Same metric definitions do not establish identical sampler, conditioning or checkpoint selection"]}
+    for mode, rows in reports.items():
+        metrics, primary, micro = aggregate_reports(rows)
+        summary["metrics"][mode], summary["reconstruction"][mode], summary["contact_micro"][mode] = metrics, primary, micro
+    train_cache = {}
+    for mode, bag in gen_bags.items():
+        kind = bag["kind"]
+        generated, reference = np.concatenate(bag["generated"], 0), np.concatenate(bag["reference"], 0)
+        if kind not in train_cache:
+            train_cache[kind] = collect_split_features(manifest, "train", config["dataset"], geometry.support_hash,
+                window, kind, geometry, device=device, target_fps=protocol["train_reference_fps"],
+                coordinate_frame=protocol["generation_frame"])
+        train, train_hash = train_cache[kind]
+        summary["reference_train_frames_sha256"] = train_hash
+        scores = generation_metrics(generated, reference, train)
+        scores.update(feature_kind=kind, mode_description=MODE_DESCRIPTIONS[mode],
+                      reference_train_values_sha256=hashlib.sha256(train.astype("<f4").tobytes()).hexdigest())
+        summary["generation"][mode] = scores
+        print(f"mode {mode} ({MODE_DESCRIPTIONS[mode]}): "
+              f"1-NNA={scores['1-NNA']:.4f} COV={scores['COV']:.4f} MMD={scores['MMD']:.4f}", flush=True)
     write_json(output / "summary.json", summary)
     return summary
 
 
-def evaluate_prediction(prediction, checkpoint, reference, manifest, output=None, start=None, device="cpu"):
+def evaluate_prediction(prediction, checkpoint, reference, manifest, output=None, start=None, device="cpu",
+                        profile="tridi", eval_fps=None):
     """Re-evaluate a saved native prediction with the same codec, assets and reference window."""
     from .train import load_run
     model, _, geometry, saved = load_run(checkpoint, device)
@@ -395,9 +518,15 @@ def evaluate_prediction(prediction, checkpoint, reference, manifest, output=None
             if not torch.allclose(states[key][mask], batch[key][mask], atol=1e-5, rtol=0):
                 raise ValueError(f"Observed {key} changed in saved prediction")
     vertices, _ = load_mesh_asset(str(Path(entry["object_mesh_path"]).resolve()))
+    protocol = protocol_options(profile, eval_fps)
+    split_entries = [e for e in entries if e["split"] == entry["split"]]
+    plan = frame_plan(split_entries, protocol["eval_fps"])[split_entries.index(entry)]
+    selected, ids = window_selection(plan, start, start + n)
     report = reconstruction(states, batch, geometry, mode, vertices * entry["object_mesh_scale"],
-                            model.codec, float(model.contact_threshold))
-    report.update(mode=mode, window_start=start, sequence_id=str(ref["sequence_id"]))
+                            model.codec, float(model.contact_threshold), frame_indices=selected)
+    report.update(mode=mode, mode_description=MODE_DESCRIPTIONS[mode], window_start=start,
+                  sequence_id=str(ref["sequence_id"]), protocol=protocol,
+                  selected_local_indices=selected.tolist(), evaluation_frame_ids=ids, input_frames=n)
     if output:
         write_json(output, report)
     return report
@@ -418,6 +547,8 @@ def main():
     bench.add_argument("--limit", type=int)
     bench.add_argument("--text-conditioned", action="store_true")
     bench.add_argument("--save-predictions", action="store_true")
+    from .evaluation_protocol import add_protocol_arguments
+    add_protocol_arguments(bench)
     old = sub.add_parser("legacy")
     for name in ("prediction", "reference", "manifest", "support", "hands", "mode", "output"):
         old.add_argument("--" + name, required=True)
@@ -427,6 +558,8 @@ def main():
         native.add_argument("--" + name, required=True)
     native.add_argument("--start", type=int)
     native.add_argument("--device", default="cpu")
+    native.add_argument("--profile", choices=("tridi", "native", "auto"), default="tridi")
+    native.add_argument("--eval-fps", type=float)
     args = vars(parser.parse_args())
     command = args.pop("command")
     torch.set_num_threads(4)

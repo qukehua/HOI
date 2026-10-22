@@ -16,6 +16,7 @@ from .data import ParametricDataset
 from .diffusion import controls_for, ParametricDiffusion
 from .evaluate import reconstruction
 from .model import ParametricConfig, ParametricDenoiser, add_geometry_batch
+from .evaluation_protocol import frame_plan, window_selection, VERSION
 
 
 @torch.no_grad()
@@ -81,14 +82,21 @@ def run_training(config, resume=None):
                                config.get("window", 120), config.get("stride", 60),
                                config.get("text_condition", True), model_config.text_dim)
     validation = ParametricDataset(config["manifest"], "val", dataset_name, geometry.support_hash,
-                                    config.get("window", 120), text_condition=config.get("text_condition", True),
+                                     config.get("window", 120),
+                                     text_condition=config.get("validation_text_condition", config.get("text_condition", True)),
                                     text_dim=model_config.text_dim)
     if not len(train) or not len(validation):
         raise ValueError("Native training requires train and validation splits")
     # Spread the fixed validation budget across the split, not only its first clip.
     from torch.utils.data import Subset
-    val_indices = np.linspace(0, len(validation) - 1,
-                             min(config.get("validation_batches", 4), len(validation))).round().astype(int).tolist()
+    # Missing fields preserve the validation semantics of existing runs on resume.
+    val_plan = frame_plan(validation.records, config.get("validation_fps", 0.))
+    candidates = [i for i, (ri, start, end) in enumerate(validation.windows)
+                  if len(window_selection(val_plan[ri], start, end)[0])]
+    if not candidates:
+        raise ValueError("No validation frames at the requested evaluation fps")
+    val_indices = [candidates[i] for i in np.linspace(0, len(candidates) - 1,
+                   min(config.get("validation_batches", 4), len(candidates))).round().astype(int)]
     validation_subset = Subset(validation, val_indices)
     model = ParametricDenoiser(model_config)
     model.codec.load_state_dict(codec.state_dict())
@@ -134,6 +142,8 @@ def run_training(config, resume=None):
             "codec_metadata": codec_metadata, "train_windows": len(train), "validation_windows": len(validation),
             "device": str(device), "best_selection": "mode010 OBJ_V2V and mode100 MPJPE separately",
             "validation_window_indices": val_indices,
+             "validation_protocol": {"version": VERSION, "fps": config.get("validation_fps", 0.),
+                 "text_conditioned": validation.text_condition, "aggregation": "frame_weighted_mean"},
             "omomo_hands": "neutral convention; no annotated hand motion"}
     write_json(output / "run_info.json", info)
     swan = init_swanlab(config, output, info)
@@ -179,11 +189,14 @@ def run_training(config, resume=None):
                         val = prepare_batch(ema, move_batch(val, device), geometry, diffusion.steps)
                         entry = validation.records[int(val["record_index"][0])]
                         vertices, _ = load_mesh_asset(str(Path(entry["object_mesh_path"]).resolve()))
+                        ri, start = int(val["record_index"][0]), int(val["window_start"][0])
+                        selected, _ = window_selection(val_plan[ri], start, start + int(val["valid_frames"].sum()))
                         for mode in scores:
                             masks = controls_for(val, dataset_name, mode)
                             result = diffusion.sample(ema, val, masks, min(diffusion.steps, config.get("validation_steps", 20)),
                                                       config.get("seed", 42) + 100000 + vi)
-                            report = reconstruction(result, val, geometry, mode, vertices * entry["object_mesh_scale"])
+                            report = reconstruction(result, val, geometry, mode, vertices * entry["object_mesh_scale"],
+                                                    frame_indices=selected)
                             metric = report["metrics"]["OBJ_V2V" if mode == "010" else "MPJPE"]
                             scores[mode].append((metric, report["frames"]))
                     restore_rng(original_rng)

@@ -15,10 +15,12 @@ def main(argv=None):
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--reference-start", type=int, help="Default: window_start saved in the prediction")
     parser.add_argument("--output")
+    parser.add_argument("--profile", choices=("tridi", "native", "auto"), default="tridi")
+    parser.add_argument("--eval-fps", type=float, help="0 keeps all native frames; tridi defaults to 1fps")
     args = parser.parse_args(argv)
     torch.set_num_threads(4)
     report = evaluate_prediction(args.prediction, args.checkpoint, args.reference, args.manifest,
-                                 args.output, start=args.reference_start)
+                                 args.output, start=args.reference_start, profile=args.profile, eval_fps=args.eval_fps)
     print(json.dumps(report, ensure_ascii=False))
 
 

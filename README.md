@@ -11,6 +11,8 @@
 
 **请按 [原生参数重训说明](docs/PARAMETRIC_RETRAINING.md) 操作。** 其中包括当前数据目录、服务器迁移、正式训练、mode010/100评估和完整网格导出。`configs/train_behave.yaml` 与 `configs/train_omomo.yaml` 是新配置，`configs/unified.yaml` 只默认选用OMOMO，不混合两个数据集。
 
+**评估已统一为 `tridi_metrics_v2`，见 [统一评估说明](docs/EVALUATION.md)。** 默认1fps评分、逐帧汇总、MMD/SD平方距离和全局接触F1；支持已有预测复评，不需重新训练。旧指标不能与新口径混用。
+
 在已配置CUDA环境、迁移好数据和资产的Linux服务器项目根目录运行：
 
 ```bash

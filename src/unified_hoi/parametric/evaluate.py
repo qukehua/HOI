@@ -46,6 +46,93 @@ def contact_scores(pred, target):
             "f1": 2 * tp / max(2 * tp + fp + fn, 1), "TP": tp, "FP": fp, "FN": fn}
 
 
+def generation_feature_kind(mode):
+    """TriDi NN feature space for a generated-bit mode (H/O/C)."""
+    human, obj = mode[0] == "1", mode[1] == "1"
+    if human and obj:
+        return "human_joints_object_pose"
+    if human:
+        return "human_joints"
+    if obj:
+        return "object_pose"
+    raise ValueError(f"generation metrics need a human and/or object target; got mode {mode}")
+
+
+def object_pose_features(pose):
+    """TriDi object_pose feature: flattened rotation matrix + center, [T,12]."""
+    pose = np.asarray(pose, np.float64)
+    rotation = rotation_matrices(pose).reshape(len(pose), 9)
+    return np.concatenate([rotation, pose[:, :3]], -1).astype(np.float32)
+
+
+def human_joint_features(joints):
+    """TriDi human_joints feature: pelvis-relative joints[1:], [T,(J-1)*3]."""
+    joints = np.asarray(joints, np.float64)
+    relative = joints - joints[:, :1]
+    return relative[:, 1:].reshape(len(joints), -1).astype(np.float32)
+
+
+def generation_features(kind, joints=None, object_pose=None):
+    if kind == "object_pose":
+        return object_pose_features(object_pose)
+    if kind == "human_joints":
+        return human_joint_features(joints)
+    if kind == "human_joints_object_pose":
+        return np.concatenate([human_joint_features(joints), object_pose_features(object_pose)], -1)
+    raise ValueError(f"unknown generation feature kind: {kind}")
+
+
+def generation_metrics(generated, reference_test, reference_train):
+    """TriDi Quality of Generated Distribution: 1-NNA / COV / MMD / SD."""
+    from sklearn.neighbors import NearestNeighbors
+
+    generated = np.asarray(generated, np.float32)
+    reference_test = np.asarray(reference_test, np.float32)
+    reference_train = np.asarray(reference_train, np.float32)
+    if min(len(generated), len(reference_test), len(reference_train)) < 1:
+        raise ValueError("generation metrics require nonempty generated/test/train features")
+    # COV: generated → test coverage of unique NN hits.
+    test_nn = NearestNeighbors(n_neighbors=1, algorithm="kd_tree", metric="l2").fit(reference_test)
+    _, cov_idx = test_nn.kneighbors(generated)
+    cov = float(len(np.unique(cov_idx[:, 0])) / len(reference_test))
+    # MMD: test → generated mean NN distance.
+    gen_nn = NearestNeighbors(n_neighbors=1, algorithm="kd_tree", metric="l2").fit(generated)
+    mmd_dist, _ = gen_nn.kneighbors(reference_test)
+    mmd = float(mmd_dist.mean())
+    # SD: generated → train mean NN distance.
+    train_nn = NearestNeighbors(n_neighbors=1, algorithm="kd_tree", metric="l2").fit(reference_train)
+    sd_dist, _ = train_nn.kneighbors(generated)
+    sd = float(sd_dist.mean())
+    # 1-NNA: leave-one-out in the pooled generated+test set (label=1 generated).
+    pooled = np.concatenate([generated, reference_test], 0)
+    labels = np.concatenate([np.ones(len(generated), np.int64), np.zeros(len(reference_test), np.int64)])
+    pool_nn = NearestNeighbors(n_neighbors=2, algorithm="kd_tree", metric="l2").fit(pooled)
+    _, idx = pool_nn.kneighbors(pooled)
+    neighbor = labels[idx[:, 1]]
+    nna = float((neighbor == labels).mean())
+    return {"1-NNA": nna, "COV": cov, "MMD": mmd, "SD": sd,
+            "feature_frames_generated": int(len(generated)),
+            "feature_frames_test": int(len(reference_test)),
+            "feature_frames_train": int(len(reference_train))}
+
+
+def collect_split_features(manifest, split, dataset, support_hash, window, kind, geometry, device="cpu"):
+    """Build TriDi-style per-frame features from a parametric split (no sampling)."""
+    rows = []
+    data = ParametricDataset(manifest, split, dataset, support_hash, window, text_condition=False, text_dim=512)
+    for batch in DataLoader(data, batch_size=1):
+        batch = move_batch(batch, device)
+        valid = batch["valid_frames"][0]
+        with torch.no_grad():
+            _, joints = geometry(batch["human"][:, valid], batch["gender"])
+        joints = joints[0].detach().cpu().numpy()
+        pose = batch["object"][0, valid].detach().cpu().numpy()
+        rows.append(generation_features(kind, joints=joints, object_pose=pose))
+    if not rows:
+        raise ValueError(f"No {split} windows for generation features")
+    return np.concatenate(rows, 0)
+
+
 def mesh_contacts(body_vertices, object_pose, object_vertices):
     rotation = rotation_matrices(object_pose)
     local = np.einsum("tji,tkj->tki", rotation, body_vertices - object_pose[:, None, :3])
@@ -182,7 +269,7 @@ def benchmark(checkpoint, manifest, output, *, modes=("010", "100"), window=120,
     if output.exists():
         raise FileExistsError(output)
     output.mkdir(parents=True)
-    reports, features = [], {}
+    reports, features, gen_bags = [], {}, {}
     for index, batch in enumerate(DataLoader(dataset, batch_size=1)):
         if limit is not None and index >= limit:
             break
@@ -217,15 +304,46 @@ def benchmark(checkpoint, manifest, output, *, modes=("010", "100"), window=120,
                                     codec_sha256=saved["codec_metadata"]["file_sha256"],
                                     support_sha256=geometry.support_hash)
             features.setdefault(mode, []).append(report)
+            # Collect TriDi generation features on valid frames (generated vs GT reference).
+            if mode[0] == "1" or mode[1] == "1":
+                kind = generation_feature_kind(mode)
+                valid = batch["valid_frames"][0]
+                with torch.no_grad():
+                    _, pred_joints = geometry(state["human"][:, valid], batch["gender"])
+                    _, gt_joints = geometry(batch["human"][:, valid], batch["gender"])
+                pred_joints = pred_joints[0].detach().cpu().numpy()
+                gt_joints = gt_joints[0].detach().cpu().numpy()
+                pred_obj = state["object"][0, valid].detach().cpu().numpy()
+                gt_obj = batch["object"][0, valid].detach().cpu().numpy()
+                bag = gen_bags.setdefault(mode, {"kind": kind, "generated": [], "reference": []})
+                bag["generated"].append(generation_features(kind, joints=pred_joints, object_pose=pred_obj))
+                bag["reference"].append(generation_features(kind, joints=gt_joints, object_pose=gt_obj))
         print(f"Evaluated native window {index + 1}/{min(limit or len(dataset), len(dataset))}", flush=True)
     summary = {"dataset": config["dataset"], "checkpoint": str(checkpoint), "steps": steps, "seed": seed,
                "text_conditioned": text_conditioned, "single_sample": True, "support_sha256": geometry.support_hash,
-               "codec_origin": saved["codec_metadata"]["origin"], "metrics": {}, "directly_comparable_to_paper_table": False}
+               "codec_origin": saved["codec_metadata"]["origin"], "metrics": {}, "generation": {},
+               "directly_comparable_to_paper_table": False}
     for mode, rows in features.items():
         summary["metrics"][mode] = {key: {"macro_mean_per_window": float(np.mean([r["metrics"][key] for r in rows])),
                                              "frame_weighted_mean": float(np.average([r["metrics"][key] for r in rows],
                                                                     weights=[r["frames"] for r in rows]))}
                                      for key in rows[0]["metrics"]}
+    if gen_bags:
+        print("Computing TriDi generation metrics...", flush=True)
+        for mode, bag in gen_bags.items():
+            kind = bag["kind"]
+            generated = np.concatenate(bag["generated"], 0)
+            reference = np.concatenate(bag["reference"], 0)
+            train = collect_split_features(manifest, "train", config["dataset"], geometry.support_hash,
+                                           window, kind, geometry, device=device)
+            scores = generation_metrics(generated, reference, train)
+            scores["feature_kind"] = kind
+            scores["mode_description"] = {"101": "H,I|O", "011": "O,I|H", "100": "H|O,I", "010": "O|H,I",
+                                          "110": "H,O|I", "111": "H,O,I"}.get(mode, mode)
+            summary["generation"][mode] = scores
+            print(f"  mode {mode} ({scores['mode_description']}): "
+                  f"1-NNA={scores['1-NNA']:.4f} COV={scores['COV']:.4f} "
+                  f"MMD={scores['MMD']:.4f} SD={scores['SD']:.4f}", flush=True)
     write_json(output / "summary.json", summary)
     return summary
 

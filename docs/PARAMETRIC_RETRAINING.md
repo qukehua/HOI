@@ -32,7 +32,7 @@ H的顺序是 `[betas, local_rot6d[52], transl]`，旋转6D存矩阵前两**行*
 
 共享时间步也会改变现有几何监督的触发频率：默认1000步、`geometry_max_t: 250`时，110/111的人体和物体同时处于低噪声区间的样本概率从6.25%变为25%。几何损失公式、权重和帧数上限不变，实际参与计算的帧仍受`geometry_frames`限制；分析消融结果时需计入这个联动影响。
 
-未知模态生成，已知模态逐步原样回填。局部姿态、betas、平移和128维接触latent的去噪目标保持不变；观察项系数0.05保留在分子，不被分母抵消。低噪声阶段使用可微原生LBS的690个表面顶点计算身体误差，并计算物体对应点误差及预测/GT表面距离误差。训练物体距离使用512个固定网格顶点近似，**最终评估使用完整物体网格顶点**。距离均为顶点最近距离，不是三角面有符号距离或穿透量。
+未知模态生成，已知模态逐步原样回填。局部姿态、betas、平移和128维接触latent的去噪目标保持不变；观察项系数0.05保留在分子，不被分母抵消。低噪声阶段使用可微原生LBS的690个表面顶点计算身体误差，并计算物体对应点误差及预测/GT表面距离误差。当前接触距离监督使用完整三角网格中被面引用的全部物体顶点和序列尺度，与已存接触标签的生成方式一致；物体V2V训练及关系分支仍使用512个固定点。距离均为顶点最近距离，不是三角面有符号距离或穿透量。
 
 训练只用train拟合归一化与AE。AE结构是690→512→256→128→256→512→690，与TriDi的层尺寸一致；使用加权BCE，独立训练3000步，val选检查点和概率阈值。官方接触权重下载服务在本次访问返回503，因此这里没有加载官方权重，也不声称两个latent空间相同。两套AE训练得到不同坐标系，严禁互换。
 
@@ -46,6 +46,29 @@ H的顺序是 `[betas, local_rot6d[52], transl]`，旋转6D存矩阵前两**行*
 如果论文实验要求同一个检查点覆盖全部模式，预先固定 `best_mode` 并对全部模式使用同一 `best.pt`；不能根据test结果挑选检查点。更稳健的实验可在开始前增大 `validation_batches`，固定采样步数和验证预算。
 
 当前支持七种完整H/O/C模式；旧XYZ关键帧IK、任意关节分量控制、稀疏接触mask和接触投影没有移植到latent。公开CLI已移除这些旧选项，传入会报错。
+
+## 接触监督（第三项）
+
+BEHAVE、OMOMO和默认训练配置启用以下三个可独立消融的选项：
+
+```yaml
+contact_supervision:
+  decoded_bce_weight: 1.0
+  balance_surface_distance: true
+  full_mesh_distance: true
+```
+
+1. 保留latent MSE，新增`contact_bce`：预测的干净接触latent先反归一化，再经本数据集的冻结AE decoder得到690个logits，与GT标签计算`binary_cross_entropy_with_logits`。只有C未知且有效的帧参与；已知接触和padding不参与。使用所有C噪声时间步的x0预测，不额外施加H/O低噪声门限。AE权重保持冻结，解码过程保留梯度，使BCE能训练接触生成分支。
+2. BCE和`surface_distance`分别计算GT正接触点、负接触点的平均误差，两类都有时各占一半；只有一类时使用该类均值，支持集为空时返回零。几何距离只统计H或O未知的所选帧，继续匹配GT距离。这样大量非接触点不会仅凭数量主导损失，也不会强迫每个正接触点达到零距离。
+3. `full_mesh_distance`让预测和GT的距离都使用清单引用的完整三角网格的全部面引用顶点，保留每个序列的尺度；不再用512点近似接触距离。不同物体和不同尺度分组计算，大网格分块寻找最近点，反向图只保留选中的近邻。计算量会增加，仍受`geometry_frames`和原有H/O低噪声门限限制。
+
+几何口径的已知历史差异：原始预处理使用`vertices[np.unique(faces)]`，当前`tridi_metrics_v2`几何评估使用资产中的全部顶点（含孤立顶点）。BEHAVE首个训练窗口的8280个标签中发现1个因此不同，不能将两个口径声称为完全等价。本项采用与现有标签、AE一致的完整面引用顶点；没有修改数据、AE或已有评估协议。若以后统一孤立顶点处理，需对双方结果使用同一新版协议重新评分。
+
+总损失在原有项上增加`decoded_bce_weight * contact_bce`；`geometry_losses.surface_distance`继续控制几何接触项的权重。默认BCE权重1.0是实验起点，尚无正式重训结果证明它最优。人体分组损失、额外关节损失和关系门控没有随本项修改，也未加入两个预测之间的自一致性损失。
+
+日志新增`contact_bce`、`contact_bce_weighted`、`contact_decoded_positive/negative`、正负点计数及`contact_decoded_precision/recall/f1`。这些是训练时一次x0预测的统计，使用本数据集AE选定的阈值，**不是验证集完整采样指标**。`contact_decoded_frames=0`时这些解码统计为零，不能作为接触质量结论。`contact_distance_positive/negative`及计数记录实际选入几何监督的两类误差。
+
+恢复旧接触目标、只测共享时间步时，将以上三个选项分别设为`0.0`、`false`、`false`。旧配置缺少`contact_supervision`也按这组关闭值解释；当前发布的三个训练YAML显式启用新监督。配置、`run_info.json`及检查点记录该设置，改变目标需新建训练实验，不能直接`--resume`旧目标。已有训练数据和两套AE无需重做；旧HOI检查点仍可按原方式采样、评估。
 
 ## 服务器需要的文件
 
@@ -70,25 +93,18 @@ H的顺序是 `[betas, local_rot6d[52], transl]`，旋转6D存矩阵前两**行*
 python scripts/prepare_parametric.py --dataset behave
 python scripts/prepare_parametric.py --dataset omomo
 
-# 独立正式训练；默认分别200k和500k步，CUDA:0。
-python -m unified_hoi.train --config configs/train_behave.yaml
-python -m unified_hoi.train --config configs/train_omomo.yaml
+# 独立正式训练，共享时间步+新接触监督；默认分别200k和500k步，CUDA:0。
+python -m unified_hoi.train --config configs/train_behave.yaml --output runs/behave_shared_t_contact_seed42
+python -m unified_hoi.train --config configs/train_omomo.yaml --output runs/omomo_shared_t_contact_seed42
 
 # 续训必须使用同一数据、网络和训练语义；可以增加max_steps。
 python -m unified_hoi.train --config configs/train_behave.yaml \
-  --resume runs/behave_parametric_seed42/last.pt
+  --output runs/behave_shared_t_contact_seed42 --resume runs/behave_shared_t_contact_seed42/last.pt
 ```
 
 可加 `--no-swanlab` 关闭日志服务。新实验使用新的 `--output`。旧22关节检查点不能作为新模型 `--resume` 的输入。
 
-2026-10-22的共享时间步实验应使用新输出目录，例如：
-
-```bash
-python -m unified_hoi.train --config configs/train_behave.yaml --output runs/behave_shared_t_seed42
-python -m unified_hoi.train --config configs/train_omomo.yaml --output runs/omomo_shared_t_seed42
-```
-
-`config.json`、`run_info.json`和检查点配置记录时间步策略。旧检查点缺少`timestep_sampling`时按`independent`识别，不能直接作为`shared`实验的`--resume`；原实验续训需保留原配置并显式设置`independent`，其他配置仍需一致。旧检查点采样和评估不受影响。此项没有修改关系门控、损失权重或模型结构。
+`config.json`、`run_info.json`和检查点配置记录时间步策略。旧检查点缺少`timestep_sampling`时按`independent`识别，不能直接作为`shared`实验的`--resume`；原实验续训需保留原配置并显式设置`independent`，其他配置仍需一致。共享时间步本身没有修改关系门控、损失权重或模型结构；新增接触监督由上面的独立配置控制。
 
 ## 两套数据使用相同重建指标
 

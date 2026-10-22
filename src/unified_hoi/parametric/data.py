@@ -99,6 +99,9 @@ class ParametricDataset(Dataset):
         # Fixed correspondence points for pose supervision, not the full-mesh evaluator.
         indices = np.linspace(0, len(vertices) - 1, 512).astype(int)
         output["object_points"] = torch.from_numpy(vertices[indices].copy())
+        # Paths collate as strings; full meshes are loaded only for selected loss frames.
+        output["object_mesh_path"] = str(Path(entry["object_mesh_path"]).resolve())
+        output["object_mesh_scale"] = float(entry["object_mesh_scale"])
         output["valid_frames"] = torch.arange(self.window) < end - start
         output["gender"] = torch.tensor(int(str(r["gender"]) == "male"))
         output["fps"] = torch.tensor(float(r["fps"]), dtype=torch.float32)

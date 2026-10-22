@@ -28,8 +28,11 @@ class ContactAE(nn.Module):
     def encode(self, contact):
         return self.encoder(contact)
 
+    def decode_logits(self, latent):
+        return self.decoder(latent)
+
     def decode(self, latent):
-        return self.decoder(latent).sigmoid()
+        return self.decode_logits(latent).sigmoid()
 
 
 def load_codec(path, dataset, support_hash):

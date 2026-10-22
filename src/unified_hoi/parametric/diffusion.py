@@ -5,6 +5,8 @@ import torch
 
 from ..geometry import matrix_to_rotation6d, rotation6d_to_matrix, object_to_world, nearest_surface
 from .body import beta_count, split_human
+from .contact_supervision import (contact_loss_options, decoded_contact_loss,
+                                  balanced_contact_mean, full_mesh_distances)
 from .model import MODALITIES
 
 MODES = ("100", "010", "001", "110", "101", "011", "111")
@@ -61,6 +63,7 @@ class ParametricDiffusion:
         self.alpha = (a / a[0]).clamp_min(1e-8).float()
 
     def training_loss(self, model, batch, masks, geometry, config, generator=None):
+        contact_options = contact_loss_options(config)
         clean = model.normalizer.encode(batch)
         times = training_timesteps(masks, self.steps, config.get("timestep_sampling", "shared"), generator)
         noisy = {}
@@ -70,13 +73,18 @@ class ParametricDiffusion:
             noisy[k] = a.sqrt() * clean[k] + (1 - a).sqrt() * noise
         prediction = model(apply_masks(noisy, clean, masks), times, masks, batch)
         valid = batch["valid_frames"]
-        losses = {}
+        losses, diagnostics = {}, {}
         for k in MODALITIES:
             weight = (~masks[k]).to(prediction[k]) + .05 * masks[k]
             # Denominator is valid coordinates, so observed .05 does not cancel.
             support = valid[..., None].expand_as(prediction[k])
             losses["denoise_" + k] = ((prediction[k] - clean[k]).square() * weight * support).sum() / support.sum().clamp_min(1)
         physical = model.normalizer.decode(apply_masks(prediction, clean, masks))
+        if contact_options["decoded_bce_weight"]:
+            frames = valid & (~masks["contact"]).any(-1)
+            losses["contact_bce"], stats = decoded_contact_loss(
+                model.codec, physical["contact"], batch["surface_contact"], frames, model.contact_threshold)
+            diagnostics.update({"contact_decoded_" + k: v for k, v in stats.items()})
         low = (times[:, :2].max(-1).values <= config.get("geometry_max_t", self.steps // 4))
         indices = (valid & low[:, None]).nonzero()
         if len(indices) and config.get("geometry_weight", 1):
@@ -91,20 +99,38 @@ class ParametricDiffusion:
                 ref_vertices, _ = geometry(batch["human"][bi, ti][:, None], gender)
                 ref_obj = batch["object"][bi, ti][:, None]
                 target_vertices = object_to_world(points, ref_obj)
-                ref_distance, _ = nearest_surface(ref_vertices, ref_obj, points)
+                if contact_options["full_mesh_distance"]:
+                    ref_distance = full_mesh_distances(ref_vertices, ref_obj, batch, bi)
+                else:
+                    ref_distance, _ = nearest_surface(ref_vertices, ref_obj, points)
             pred_vertices = object_to_world(points, o)
             losses["object_v2v"] = (pred_vertices - target_vertices).square().mean()
             losses["body_v2v"] = (vertices - ref_vertices).square().mean()
-            distance, _ = nearest_surface(vertices, o, points)
+            if contact_options["full_mesh_distance"]:
+                distance = full_mesh_distances(vertices, o, batch, bi)
+            else:
+                distance, _ = nearest_surface(vertices, o, points)
             # Match GT distances, rather than pulling every positive joint to 2 cm.
-            contact_weight = 1 + 4 * batch["surface_contact"][bi, ti][:, None]
-            losses["surface_distance"] = ((distance - ref_distance).square() * contact_weight).mean()
+            target = batch["surface_contact"][bi, ti][:, None]
+            if contact_options["balance_surface_distance"]:
+                generated = ((~masks["human"][bi, ti]).any(-1) | (~masks["object"][bi, ti]).any(-1))
+                support = generated[:, None, None].expand_as(target)
+                losses["surface_distance"], stats = balanced_contact_mean(
+                    (distance - ref_distance).square(), target, support)
+                diagnostics.update({"contact_distance_" + k: v for k, v in stats.items()})
+            else:
+                contact_weight = 1 + 4 * target
+                losses["surface_distance"] = ((distance - ref_distance).square() * contact_weight).mean()
         total = sum(losses[k] for k in losses if k.startswith("denoise_"))
         weights = {"object_v2v": 10., "body_v2v": 1., "surface_distance": 5.}
         weights.update(config.get("geometry_losses", {}))
         total = total + config.get("geometry_weight", 1.) * sum(weights[k] * losses[k] for k in weights if k in losses)
+        if "contact_bce" in losses:
+            weighted = contact_options["decoded_bce_weight"] * losses["contact_bce"]
+            total = total + weighted
+            diagnostics["contact_bce_weighted"] = weighted
         losses["loss"] = total
-        return total, {k: float(v.detach()) for k, v in losses.items()}
+        return total, {k: float(v.detach()) for k, v in (losses | diagnostics).items()}
 
     @torch.no_grad()
     def sample(self, model, batch, masks, steps=50, seed=42):

@@ -12,6 +12,7 @@ from ..smpl_mesh import DEFAULT_MODEL_PATH
 from . import REPRESENTATION
 from .body import BodyGeometry, digest_file
 from .contact import load_codec
+from .contact_supervision import contact_loss_options
 from .data import ParametricDataset
 from .diffusion import controls_for, ParametricDiffusion, TIMESTEP_SAMPLING
 from .evaluate import reconstruction
@@ -56,6 +57,7 @@ def run_training(config, resume=None):
     config.setdefault("timestep_sampling", "shared")
     if config["timestep_sampling"] not in TIMESTEP_SAMPLING:
         raise ValueError(f"timestep_sampling must be one of {TIMESTEP_SAMPLING}")
+    config["contact_supervision"] = contact_loss_options(config)
     if config.get("representation") != REPRESENTATION or config.get("dataset") not in ("behave", "omomo"):
         raise ValueError("Set representation: parametric_v1 and one dataset")
     dataset_name = config["dataset"]
@@ -120,9 +122,12 @@ def run_training(config, resume=None):
         saved_config = dict(saved["config"])
         # Checkpoints before this option used independent H/O/C training times.
         saved_config.setdefault("timestep_sampling", "independent")
+        saved_config["contact_supervision"] = contact_loss_options(saved_config)
         if config["timestep_sampling"] != saved_config["timestep_sampling"]:
             raise ValueError("Resume timestep_sampling changed; start a fresh run for shared-timestep training. "
                              "Old checkpoints without this field use independent timesteps.")
+        if config["contact_supervision"] != saved_config["contact_supervision"]:
+            raise ValueError("Resume contact_supervision changed; start a fresh run for the new objective.")
         mutable = {"max_steps", "output", "device", "log_every", "save_every", "progress", "use_swanlab",
                    "swanlab_run_name", "swanlab_mode", "swanlab_workspace", "cpu_threads"}
         if ({k: v for k, v in config.items() if k not in mutable}
@@ -146,6 +151,7 @@ def run_training(config, resume=None):
     write_json(output / "config.json", config)
     info = {"representation": REPRESENTATION, "dataset": dataset_name,
             "timestep_sampling": config["timestep_sampling"],
+            "contact_supervision": config["contact_supervision"],
             "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
             "frozen_contact_parameters": sum(p.numel() for p in model.codec.parameters()),
             "body_assets_in_checkpoint": False, "geometry_provenance": provenance,

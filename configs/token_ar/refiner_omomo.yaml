@@ -1,0 +1,23 @@
+kind: token_ar_refiner_v1
+cache: runs/refinement_cache/omomo
+output: runs/token_ar/omomo/refiner
+device: cuda:0
+body_models: data/smplx_models
+seed: 42
+cpu_threads: 4
+max_steps: 5000
+schedule_steps: 5000
+warmup_steps: 100
+learning_rate: 0.0001
+weight_decay: 0.01
+gradient_accumulation_steps: 8
+gradient_clip: 1.0
+geometry_frames: 16
+validate_every: 250
+early_stopping_patience: 8
+log_every: 20
+model:
+  width: 192
+  layers: 4
+  contact_threshold: 0.05
+  contact_softness: 0.01

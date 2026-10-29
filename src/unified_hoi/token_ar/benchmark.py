@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 
 from ..mesh_geometry import load_mesh_asset
 from ..runtime import move_batch, write_json
-from . import MODES
+from . import MODALITIES, MODES
 from .body import BodyGeometry, digest_file
 from .checkpoint import load_run
 from .codecs import load_codecs
@@ -20,6 +20,7 @@ from .evaluation_protocol import (MODE_DESCRIPTIONS, add_protocol_arguments, agg
                                   frame_plan, protocol_options, window_selection)
 from .metrics import generation_feature_kind, generation_features, generation_metrics, reconstruction
 from .sample import complete
+from .refinement import check_sampler, load_refiner
 
 
 def collect_split_features(dataset, kind, geometry, target_fps, coordinate_frame, device):
@@ -49,7 +50,7 @@ def collect_split_features(dataset, kind, geometry, target_fps, coordinate_frame
 def benchmark(checkpoint, output, *, modes=MODES, split="val", seed=42, temperature=0., top_k=50,
               text_conditioned=True, limit=None, device="cpu", dtype="bfloat16", profile="tridi",
               eval_fps=None, train_reference_fps=None, generation_frame="pelvis",
-              body_models="data/smplx_models"):
+              body_models="data/smplx_models", refiner=None):
     if (not modes or any(m not in MODES for m in modes) or len(set(modes)) != len(modes)
             or split not in ("val", "test") or (limit is not None and limit < 1)):
         raise ValueError("Specify distinct H/O/C modes, a val/test split and a positive limit")
@@ -63,12 +64,18 @@ def benchmark(checkpoint, output, *, modes=MODES, split="val", seed=42, temperat
     window = config.get("window", 120)
     codecs, _ = load_codecs(Path(checkpoint) / "codecs.pt", config["dataset"], saved["support_sha256"], device)
     geometry = BodyGeometry(config["dataset"], config["contact_support"], body_models).to(device)
+    correction = None
+    if refiner:
+        correction, refinement_saved = load_refiner(refiner, saved, digest_file(Path(checkpoint) / "metadata.json"),
+                                                    geometry, device)
+        check_sampler(refinement_saved, temperature, top_k, text_conditioned)
     dataset = MotionDataset(config["manifest"], split, config["dataset"], geometry.support_hash, window)
     if not len(dataset):
         raise ValueError("No evaluation windows")
     plan = frame_plan(dataset.records, protocol["eval_fps"])
     output.mkdir(parents=True)
     reports, bags, ids, meshes = {}, {}, [], {}
+    coarse_reports = {}
     reference_digest = hashlib.sha256()
     total = len(dataset) if limit is None else min(limit, len(dataset))
     for index in range(total):
@@ -99,10 +106,22 @@ def benchmark(checkpoint, output, *, modes=MODES, split="val", seed=42, temperat
         for mode in modes:
             values, _ = complete(model, codecs, builder, batch, mode, prompt, seed + index * 1009,
                                  temperature, top_k)
+            coarse_report = None
+            if correction is not None:
+                coarse_states = {key: values[key][None] for key in MODALITIES}
+                coarse_report = reconstruction(coarse_states, target, geometry, mode, vertices,
+                                               ProbabilityDecoder(), .5, selected)
+                coarse_reports.setdefault(mode, []).append(coarse_report)
+                with torch.no_grad():
+                    values, _ = correction(values, mode, batch["object_bps"][0], batch["gender"][0],
+                                            float(batch["fps"][0]), geometry,
+                                            torch.tensor(vertices, device=device, dtype=torch.float32))
             states = {key: values[key][None] for key in ("human", "object", "contact")}
             report = reconstruction(states, target, geometry, mode, vertices, ProbabilityDecoder(), .5, selected)
             report.update(mode=mode, mode_description=MODE_DESCRIPTIONS[mode], sequence_id=entry["sequence_id"],
                           window_start=start, input_frames=n, selected_local_indices=selected.tolist())
+            if coarse_report is not None:
+                report["coarse_metrics"] = coarse_report["metrics"]
             with (output / "per_clip.jsonl").open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps(report, allow_nan=False) + "\n")
             reports.setdefault(mode, []).append(report)
@@ -128,6 +147,13 @@ def benchmark(checkpoint, output, *, modes=MODES, split="val", seed=42, temperat
                "evaluation_frames_sha256": fingerprint(sorted(ids)),
                "reference_values_sha256": reference_digest.hexdigest(), "reference_train_frames_sha256": None,
                "metrics": {}, "reconstruction": {}, "contact_micro": {}, "generation": {}}
+    if refiner:
+        summary.update(sampler="autoregressive_vq_continuous_refinement", refiner_sha256=digest_file(refiner),
+                       refiner=str(refiner), coarse_reconstruction={}, coarse_contact_micro={})
+        for mode, rows in coarse_reports.items():
+            _, primary, micro = aggregate_reports(rows)
+            summary["coarse_reconstruction"][mode] = primary
+            summary["coarse_contact_micro"][mode] = micro
     for mode, rows in reports.items():
         metrics, primary, micro = aggregate_reports(rows)
         summary["metrics"][mode], summary["reconstruction"][mode], summary["contact_micro"][mode] = metrics, primary, micro
@@ -165,6 +191,7 @@ def main():
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--dtype", choices=("float32", "bfloat16", "float16"), default="bfloat16")
     parser.add_argument("--body-models", default="data/smplx_models")
+    parser.add_argument("--refiner", help="Optional continuous refiner; also reports paired coarse reconstruction")
     args = vars(parser.parse_args())
     torch.set_num_threads(4)
     summary = benchmark(**args)

@@ -81,6 +81,9 @@ def evaluate(prediction, reference, manifest, checkpoint, output, device="cpu", 
     report.update(architecture=ARCHITECTURE, mode=mode, eval_fps=eval_fps, text_prompt=str(values["text_prompt"]),
                   frame_indices=selected.tolist(), frame_ids=frame_ids,
                   checkpoint=str(checkpoint), sampler="autoregressive_vq")
+    if "refiner_sha256" in values:
+        report.update(sampler="autoregressive_vq_continuous_refinement",
+                      refiner_sha256=str(values["refiner_sha256"]), refiner_path=str(values["refiner_path"]))
     write_json(output, report)
     return report
 

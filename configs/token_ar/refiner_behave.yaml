@@ -1,0 +1,34 @@
+kind: token_ar_refiner_v1
+cache: runs/refinement_cache/behave_step1000
+output: runs/token_ar/behave/refiner_step1000
+device: cuda:0
+body_models: data/smplx_models
+seed: 42
+cpu_threads: 4
+max_steps: 5000
+schedule_steps: 5000
+warmup_steps: 100
+learning_rate: 0.0001
+weight_decay: 0.01
+gradient_accumulation_steps: 8
+gradient_clip: 1.0
+geometry_frames: 16
+validate_every: 250
+early_stopping_patience: 8
+log_every: 20
+model:
+  width: 192
+  layers: 4
+  contact_threshold: 0.05
+  contact_softness: 0.01
+loss_weights:
+  body_vertices: 1.0
+  object_vertices: 10.0
+  relative_joints: 1.0
+  surface_distance: 5.0
+  contact_bce: 1.0
+  geometry_contact_bce: 0.1
+  contact_consistency: 0.1
+  rotation: 0.1
+  velocity: 0.01
+  residual: 0.01

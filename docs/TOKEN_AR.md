@@ -109,6 +109,42 @@ accelerate launch --config_file configs/token_ar/accelerate_qwen35_4gpu.yaml \
 
 AR续训保持配置和进程数一致，可提高max_steps；VQ码本或清单改变会拒绝续训。`best.json`指向按七模式验证token CE的等权平均选出的单一检查点。这里的验证是teacher-forced预测，不是完整生成的MPJPE、接触F1或物理质量。不能用test挑检查点。
 
+## P0：三套 VQ 的重建基线
+
+无需重新训练，也不加载 Qwen。`evaluate_codecs` 直接将验证集真实 H/O/C 编码成各自的离散 token，再用冻结的 VQ 解码。默认一次评估100（仅重建人体）、010（仅重建物体）、001（仅重建接触）和111（联合重建）；mask为0的模态保留真实值。这是有真实目标token的重建诊断，不是条件生成成绩，也不是数学上的性能上界。
+
+诊断已有 AR 结果时，优先使用**该 AR 检查点自带的 `codecs.pt`**，避免之后更新的 `vq/best.pt` 与原实验码本不同。一次加载的文件已经包含三套独立VQ，无需分别启动三次任务。
+
+在服务器项目根目录运行（Windows使用 `.venv/Scripts/python.exe`）：
+
+```bash
+.venv/bin/python -m unified_hoi.token_ar.evaluate_codecs \
+  --checkpoint runs/behave_10.27/checkpoint-0001000/codecs.pt \
+  --manifest data/processed/behave_parametric.jsonl \
+  --contact-support data/parametric_assets/behave/contact_support.npz \
+  --split val --window 120 --eval-fps 1 --device cuda:0 \
+  --output runs/eval_behave_vq_oracle_step1000
+```
+
+若只测试第一阶段模型，改为 `--checkpoint runs/token_ar/behave/vq/best.pt`。输出目录必须是新目录。冒烟检查可加 `--limit 2` 并另用一个输出目录；正式结论需要不加limit的完整val。默认评估1fps、73关节、690接触顶点、5cm几何接触阈值，沿用AR的 `tridi_metrics_v2` 公式；VQ仍编码原始帧率的完整有效窗口，再抽帧计算指标。
+
+输出 `summary.json` 和 `per_clip.jsonl`，重点读取：
+
+| JSON位置 | 含义 |
+| --- | --- |
+| `reconstruction.100.MPJPE` / `MPJPE_PA` | 人体重建关节误差；MPJPE相对骨盆 |
+| `reconstruction.100.HUMAN_TRANSL_L2` / `HUMAN_V2V_690` | 世界坐标SMPL平移误差／690个接触顶点重建误差，补充根相对MPJPE未覆盖的信息 |
+| `reconstruction.010.OBJ_V2V` / `OBJ_CENTER` / `OBJ_ROTATION_DEG` | 物体顶点／中心／旋转重建误差 |
+| `reconstruction.001.CONTACT_TOKEN_F1` | 接触VQ解码与GT网格接触比较，可与AR的接触token F1对照 |
+| `contact_diagnostics.VQ_VS_NATIVE` | 接触VQ对其训练用原始二值标签的P/R/F1 |
+| `contact_diagnostics.NATIVE_VS_GT_MESH` | 原始接触标签与评估重算的GT网格接触差异，用于排查标签口径 |
+| `reconstruction.100.SBJ_CONTACT_F1` / `010.OBJ_CONTACT_F1` / `111.SBJ_CONTACT_F1` | 单独重建H、单独重建O、联合重建后，实际几何接触是否被保留 |
+| `token_usage.human` / `object` / `contact` | 全部有效token的使用码数、使用比例、perplexity与直方图，排除padding |
+
+距离单位为米（乘100得到cm），旋转为度，P/R/F1为0–1。接触主指标按全局TP/FP/FN汇总，读取 `reconstruction` 或 `contact_diagnostics`，不要用逐窗口F1的平均值代替。100/010中的接触token是已知GT，不能用它们证明接触VQ重建良好。旧报告中的 `CONTACT_DIFFUSED_F1` 若表示解码接触，与此处 `CONTACT_TOKEN_F1` 对应；`CONTACT_MESHES` 原始列是accuracy%，应比较另列的 `SBJ_CONTACT_F1` / `OBJ_CONTACT_F1`。
+
+判断方法：在相同VQ权重、划分、窗口和评估帧上，如果VQ重建已经接近当前AR的较大误差，先改善第一阶段表示与重建；如果VQ重建明显更好，则主要排查AR预测与条件利用。H/O各自误差较小但111网格接触F1明显下降，说明独立量化可能破坏交互一致性，连续几何修正值得验证。低码本利用率只是一项诊断，不能单凭它认定坍塌。新报告可用 `evaluation_frames_sha256` 与 `reference_values_sha256` 核对同一评估对象；旧JSON若缺少这些字段，只能先对照划分、帧数和协议。
+
 ## 采样与评估
 
 下例把 `REF.npz` 替换为清单里的真实原生记录，检查点替换为已训练目录。
@@ -143,8 +179,52 @@ python -m unified_hoi.token_ar.benchmark \
 
 ## 目标与已验证边界
 
-AR训练使用离散目标token CE；接触BCE在接触VQ-VAE训练阶段使用，不是AR阶段的可微几何约束。离散采样后还没有接触/穿透优化，不能声称满足物理一致性。增加这些约束需单独设计可微训练或采样后优化，并做消融。
+AR训练使用离散目标token CE；接触BCE在接触VQ-VAE训练阶段使用，不是AR阶段的可微几何约束。2026-10-29新增可选的连续修正阶段，见下文。它的几何梯度只更新修正网络，不穿过离散采样回传到Qwen。尚无正式训练后的质量结果，也没有带符号穿透损失，不能声称已保证物理一致性。
 
 已有CPU验证使用随机初始化的微型Qwen3/Qwen3.5和真实数据小窗口，覆盖两套数据的VQ/AR训练与续训、010/100/001/111采样、复评及完整网格解码。历史Qwen3.5验证记录为38项单元测试通过，并检查了条件保持、未知GT隔离、权重映射、全参数更新和缓存一致性。
 
 2026-10-27起已在4×RTX5090上用正式4B权重训练BEHAVE（`runs/behave_10.27`）。训练CE趋近0而验证CE在1000步最低，之后持续上升，属于明显过拟合（训练窗口仅约1745个）；正式结论需以批量基准结果为准。Qwen3.5优化内核（causal-conv1d、flash-linear-attention）尚未安装。
+
+## 可选第三阶段：连续几何修正（2026-10-29）
+
+`refinement.py` 实现一个共享七种mask的时序残差网络。输入为真实AR采样并经VQ解码的H/O/C、mask、fps、物体BPS，以及由这些粗结果计算的人体22关节物体局部坐标、最近网格顶点向量和距离。forward不接收未知模态GT。网络修正生成模态的人体根平移、52个局部关节旋转、物体旋转/平移及690点接触logit。体型沿用粗生成值；OMOMO中性手约定保留。旋转通过SO(3)残差更新，已知模态逐值保持原样。
+
+训练使用独立缓存，Qwen和三套VQ全部冻结。缓存必须来自自由自回归生成，不使用teacher forcing或GT token重建冒充生成误差。缓存制作需要运行4B，但修正网络训练本身不加载Qwen，使用单卡FP32。缓存仅包含train/val，禁止用test训练或选模。验证遍历缓存里的全部val窗口、全部选定模式；物理损失每窗均匀选择最多16帧，不等同于完整benchmark。
+
+监督项：人体690个选定网格顶点MSE、物体全网格顶点MSE（用网格矩精确计算）、人体—物体相对关节位置、平衡的表面距离误差、解码接触BCE、几何接触BCE、接触—几何双向一致性、旋转误差、GT速度匹配、残差正则。最近顶点索引查找不求导，但距离对人体顶点和物体位姿可微。接触距离沿用评估的最近网格顶点代理，阈值5cm；不是带符号三角面距离或严格穿透约束。
+
+三步命令，在服务器项目根目录执行：
+
+```bash
+# 1. 固定一个AR检查点，为train/val全部窗口与七种mask生成缓存。
+python -m unified_hoi.token_ar.prepare_refinement \
+  --checkpoint runs/behave_10.27/checkpoint-0001000 \
+  --output runs/refinement_cache/behave_step1000 \
+  --device cuda:0 --dtype bfloat16 --temperature 0
+
+# 中断后用相同参数加 --resume；--limit 仅供小窗口流程验证，不能当正式实验。
+# 缓存目录完成后有COMPLETE标记；不改原AR、VQ或原生数据。
+
+# 2. 训练小型修正网络；自动保存初始基线、best.pt、last.pt和逐次验证记录。
+python -m unified_hoi.token_ar.train_refiner \
+  --config configs/token_ar/refiner_behave.yaml
+
+# 续训：配置schedule_steps保持不变，可增加max_steps，优化器/调度器/抽样状态恢复。
+# python -m unified_hoi.token_ar.train_refiner --config configs/token_ar/refiner_behave.yaml \
+#   --resume runs/token_ar/behave/refiner_step1000/last.pt
+
+# 3. 同一批AR样本，对比修正前后的重建指标。
+python -m unified_hoi.token_ar.benchmark \
+  --checkpoint runs/behave_10.27/checkpoint-0001000 \
+  --refiner runs/token_ar/behave/refiner_step1000/best.pt \
+  --split val --temperature 0 --device cuda:0 --dtype bfloat16 \
+  --output runs/eval_behave_step1000_refined
+```
+
+`summary.json`中`reconstruction`/`contact_micro`是修正后，`coarse_reconstruction`/`coarse_contact_micro`是同批次修正前；`generation`只报告修正后生成分布指标。没有`--refiner`时保持原路径。完整验证几何损失选最优；初始零残差模型也作为候选，防止只保存比初始更差的模型。默认5000步、warmup+cosine、8次验证无改善早停只是初始设置，未宣称收敛或优于基线。
+
+`sample`同样支持`--refiner`，使用上面缓存时需加`--temperature 0 --text-conditioned`。采样温度/top-k（随机采样时）和文本开关必须匹配缓存设置。输出NPZ保留`coarse_human/object/contact`和修正后结果；保存的VQ token对应粗生成值，不能用于重新解码得到修正后运动。`evaluate`可直接复评修正结果并保留修正检查点SHA256。
+
+修正检查点绑定原AR metadata、VQ、接触支持和身体资产哈希；1000步训练的修正器不能直接附加到24000步AR。缓存训练还验证原生样本和物体网格哈希。跨数据集不能混用；OMOMO配置为`configs/token_ar/refiner_omomo.yaml`，需要先用其AR检查点制作对应缓存。
+
+验证：`python -B -m unittest discover -s tests -p 'test_refinement*.py' -v`。覆盖两种身体表示、七种mask条件保持、SO(3)合法性、几何梯度、冻结边界、检查点绑定、真实SMPL-H/SMPL-X资产、小型随机Qwen的缓存/训练/精确续训/采样/复评/配对benchmark。CPU流程验证不证明4B生成质量或正式训练后的收益。

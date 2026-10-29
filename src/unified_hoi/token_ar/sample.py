@@ -7,12 +7,14 @@ import torch
 from torch.utils.data import DataLoader
 
 from ..data import read_manifest
+from ..mesh_geometry import load_mesh_asset
 from ..runtime import move_batch
 from . import ARCHITECTURE, MODALITIES, MODES
 from .body import BodyGeometry, digest_file, standard_parameters
 from .checkpoint import load_run
 from .codecs import canonicalize, load_codecs
 from .data import MotionDataset, load_record
+from .refinement import check_sampler, load_refiner
 
 
 @torch.no_grad()
@@ -43,7 +45,7 @@ def complete(model, codecs, builder, batch, mode, text=None, seed=42, temperatur
 
 def sample(checkpoint, manifest, reference, output, mode, frames=120, start=0, seed=42,
            device="cpu", dtype="float32", text_conditioned=False, text=None, temperature=1., top_k=50,
-           contact_support=None, body_models="data/smplx_models"):
+           contact_support=None, body_models="data/smplx_models", refiner=None):
     destination = Path(output)
     if destination.suffix != ".npz" or destination.exists():
         raise ValueError("Choose a new .npz output file")
@@ -74,11 +76,26 @@ def sample(checkpoint, manifest, reference, output, mode, frames=120, start=0, s
         if text_conditioned and not text.strip():
             raise ValueError("Requested text condition is missing")
     values, tokens = complete(model, codecs, builder, batch, mode, text, seed, temperature, top_k)
+    coarse = None
+    if refiner:
+        correction, refinement_saved = load_refiner(refiner, saved, digest_file(Path(checkpoint) / "metadata.json"),
+                                                    geometry, device)
+        check_sampler(refinement_saved, temperature, top_k, bool(text.strip()))
+        mesh, _ = load_mesh_asset(str(Path(entry["object_mesh_path"]).resolve()))
+        vertices = torch.tensor(mesh * entry["object_mesh_scale"], device=device, dtype=torch.float32)
+        coarse = values
+        with torch.no_grad():
+            values, _ = correction(coarse, mode, batch["object_bps"][0], batch["gender"][0],
+                                    float(batch["fps"][0]), geometry, vertices)
     with torch.no_grad():
         vertices, joints = geometry(values["human"][None], batch["gender"])
     arrays = {"human_params": values["human"].cpu().numpy(), "object": values["object"].cpu().numpy(),
               "contact_probability": values["contact"].cpu().numpy(),
               "contact_vertices": vertices[0].cpu().numpy(), "joints73": joints[0].cpu().numpy()}
+    if refiner:
+        arrays.update(refiner_sha256=digest_file(refiner), refiner_path=str(refiner),
+                      tokens_describe="coarse_vq_output",
+                      **{"coarse_" + k: v.cpu().numpy() for k, v in coarse.items()})
     for key, bit in zip(MODALITIES, mode):
         arrays[key + "_tokens"] = np.asarray(tokens[key], np.int64)
         arrays[key + "_mask"] = np.full(values[key].shape, bit == "0", bool)
@@ -115,6 +132,7 @@ def main():
     parser.add_argument("--text", help="Explicit user prompt; overrides the reference caption")
     parser.add_argument("--contact-support")
     parser.add_argument("--body-models", default="data/smplx_models")
+    parser.add_argument("--refiner", help="Optional trained continuous refiner best.pt")
     torch.set_num_threads(4)
     print(sample(**vars(parser.parse_args())))
 

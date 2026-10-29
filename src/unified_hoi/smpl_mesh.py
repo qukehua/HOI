@@ -48,16 +48,6 @@ def _layer(model_path, gender, batch_size=1, *, model_type):
     return _LAYERS[key]
 
 
-def local_rotations(global_rotations: np.ndarray) -> np.ndarray:
-    """[T,22,3,3] globals -> locals, preserving the world-space root rotation."""
-    local = np.empty_like(global_rotations)
-    local[:, 0] = global_rotations[:, 0]
-    for joint in range(1, 22):
-        parent = global_rotations[:, SMPL_PARENTS[joint]]
-        local[:, joint] = parent.transpose(0, 2, 1) @ global_rotations[:, joint]
-    return local
-
-
 def body_skinning_weights(weights, parents):
     """Fold omitted joints into their nearest retained body ancestor.
 
@@ -84,7 +74,7 @@ def body_skinning_weights(weights, parents):
 def record_to_smpl(record, model_path=DEFAULT_MODEL_PATH):
     """Decode a processed/prediction archive using its saved body provenance."""
     if str(record.get("representation")) == "parametric_v1":
-        from .parametric.body import decode_full, digest_file
+        from .token_ar.body import decode_full, digest_file
         from .body_metadata import DATASET_MODELS
         dataset, gender = str(record["dataset"]), str(record["gender"])
         model_type = DATASET_MODELS[dataset]

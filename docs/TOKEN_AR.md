@@ -1,24 +1,10 @@
-# 两套 HOI 模型：连续扩散与 masked autoregressive VQ
+# Token-AR：masked autoregressive VQ 的 HOI 模型
 
-当前项目根目录为 `D:/code/HOI`。两套模型使用不同 Python 包、配置和输出目录。
+项目只保留本模型（`src/unified_hoi/token_ar/`，架构标识 `token_ar_v1`，配置在 `configs/token_ar/`）。原连续扩散模型已于2026-10-29删除，可从 git 历史恢复；扩散检查点与本模型不兼容。
 
-**已选定的正式新模型：`Qwen/Qwen3.5-4B-Base`，全参数训练 + 七种 H/O/C mask，不使用 LoRA（2026-10-22）。** 两套数据的配置为 `configs/token_ar/qwen35_4b_behave.yaml` 和 `qwen35_4b_omomo.yaml`，配套四卡配置为 `accelerate_qwen35_4gpu.yaml`。旧 Qwen3 配置保留作对照，不是当前选定方案。
+**正式模型：`Qwen/Qwen3.5-4B-Base`，全参数训练 + 七种 H/O/C mask，不使用 LoRA（2026-10-22）。** 两套数据的配置为 `configs/token_ar/qwen35_4b_behave.yaml` 和 `qwen35_4b_omomo.yaml`，配套四卡配置为 `accelerate_qwen35_4gpu.yaml`。Qwen3-4B/8B 配置保留作对照。
 
-| 项目 | 保留的扩散模型 | 新的 token 自回归模型 |
-| --- | --- | --- |
-| 模型代码 | `src/unified_hoi/parametric/` | `src/unified_hoi/token_ar/` |
-| 架构标识 | `parametric_v1` 扩散检查点 | `token_ar_v1` |
-| 配置 | `configs/train_behave.yaml`、`train_omomo.yaml` | `configs/token_ar/` |
-| 训练入口 | `python -m unified_hoi.train` | `python -m unified_hoi.token_ar.train` |
-| 采样入口 | `python -m unified_hoi.sample` | `python -m unified_hoi.token_ar.sample` |
-| 输出目录 | 原配置指定的目录 | `runs/token_ar/<dataset>/...` |
-| 人体／物体 | 连续参数去噪 | 独立 VQ-VAE 编码为离散 token，生成后解码 |
-| 接触 | 旧128维连续 AE latent | 新接触 VQ-VAE，直接编码690点表面接触 |
-| 任务切换 | H/O/C mask | 同一模型的 H/O/C mask；不建立任务专用 LoRA |
-
-新目录从现有身体解码、数据读取、评估协议和指标函数复制后修改，来源及原文件 SHA256 记录在 `TOKEN_AR_ORIGIN.json`。新模型不导入 `parametric` 下的模型、训练器、扩散过程或 AE。原模型文件保持字节不变。
-
-只读原生数据和通用网格、旋转、清单、运行工具仍可共享；修改这些通用工具会影响两条路径，应同时检查。新目录里的 native data、body 和 metric 副本后续独立维护，不能认为会自动同步原模型修正。原来的公共 CLI 和 `configs/unified.yaml` 继续运行扩散模型。
+身体解码、数据读取、评估协议和指标函数最初从扩散模型复制后修改，来源及原文件 SHA256 记录在 `TOKEN_AR_ORIGIN.json`。`src/unified_hoi/` 顶层的清单、旋转、网格 BPS、SMPL 网格和运行工具由本模型直接使用。
 
 ## 新模型的数据流
 
@@ -123,7 +109,7 @@ accelerate launch --config_file configs/token_ar/accelerate_qwen35_4gpu.yaml \
 
 AR续训保持配置和进程数一致，可提高max_steps；VQ码本或清单改变会拒绝续训。`best.json`指向按七模式验证token CE的等权平均选出的单一检查点。这里的验证是teacher-forced预测，不是完整生成的MPJPE、接触F1或物理质量。不能用test挑检查点。
 
-## 采样与复评
+## 采样与评估
 
 下例把 `REF.npz` 替换为清单里的真实原生记录，检查点替换为已训练目录。
 
@@ -142,14 +128,23 @@ python -m unified_hoi.token_ar.evaluate \
 
 `--text-conditioned`使用清单caption，`--text`使用自定义prompt；两者都不指定则关闭文本。默认temperature=1、top-k=50；temperature=0为贪心。采样支持固定帧数，不是未来帧预测专用接口。默认评估1fps，保留现有73关节和几何接触指标公式；`--eval-fps 0`评估全部有效帧。`CONTACT_TOKEN`指接触token解码，`CONTACT_MESHES`来自人体和物体几何，两者独立报告。
 
-保存原生人体参数、标准axis-angle姿态、物体姿态、接触概率、三路token、条件mask、时间戳和资产信息。SMPL-X手指仍固定中性；现有数据没有动态手指监督。旧扩散的批量benchmark入口不接收AR检查点；此版本提供AR单条采样和复评，不声称已经完成论文数据划分下的批量基准。
+保存原生人体参数、标准axis-angle姿态、物体姿态、接触概率、三路token、条件mask、时间戳和资产信息。SMPL-X手指仍固定中性；现有数据没有动态手指监督。
+
+批量基准按 `tridi_metrics_v2` 口径，对 val/test 全部窗口逐模式采样并评分：重建指标（MPJPE、PA-MPJPE、V2V、物体中心/旋转误差、接触 P/R/F1，帧加权、接触按全局 micro 汇总）以及生成指标 1-NNA/COV/MMD/SD（平方 L2，人体特征相对骨盆，SD 的训练参考默认10fps）。
+
+```bash
+python -m unified_hoi.token_ar.benchmark \
+  --checkpoint runs/behave_10.27/checkpoint-0001000 \
+  --split val --modes 100 010 001 111 --temperature 0 \
+  --device cuda:0 --dtype bfloat16 --output runs/eval_behave_10.27_step1000
+```
+
+输出 `summary.json`（含协议版本、评估帧和参考集 SHA256，便于判断两次结果是否同口径）与逐条 `per_clip.jsonl`。`--limit N` 只评前N个窗口用于冒烟检查；`--no-text` 关闭清单文本；`--profile native` 评估全部帧。不能用 test 选检查点。
 
 ## 目标与已验证边界
 
-原扩散几何关系分支、去噪目标和低噪声几何损失留在原模型。新AR训练使用离散目标token CE；接触BCE在接触VQ-VAE训练阶段使用，不是AR阶段的可微几何约束。离散采样后还没有接触/穿透优化，不能声称满足物理一致性。增加这些约束需单独设计可微训练或采样后优化，并做消融。
+AR训练使用离散目标token CE；接触BCE在接触VQ-VAE训练阶段使用，不是AR阶段的可微几何约束。离散采样后还没有接触/穿透优化，不能声称满足物理一致性。增加这些约束需单独设计可微训练或采样后优化，并做消融。
 
 已有CPU验证使用随机初始化的微型Qwen3/Qwen3.5和真实数据小窗口，覆盖两套数据的VQ/AR训练与续训、010/100/001/111采样、复评及完整网格解码。历史Qwen3.5验证记录为38项单元测试通过，并检查了条件保持、未知GT隔离、权重映射、全参数更新和缓存一致性。
 
-没有加载或训练正式4B权重，也未验证四卡CUDA、优化内核、吞吐或峰值显存。官方4B权重索引与meta-device模型的骨干键核对不等于正式模型运行结果。生成质量和资源需求仍需服务器实测。
-
-按用户要求，专用测试代码、验证脚本和独立测试报告列入本轮清理清单。上述结论作为历史记录保留；清理执行状态见 `cleanup_tests_docs_20261022.json`。
+2026-10-27起已在4×RTX5090上用正式4B权重训练BEHAVE（`runs/behave_10.27`）。训练CE趋近0而验证CE在1000步最低，之后持续上升，属于明显过拟合（训练窗口仅约1745个）；正式结论需以批量基准结果为准。Qwen3.5优化内核（causal-conv1d、flash-linear-attention）尚未安装。

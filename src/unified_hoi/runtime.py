@@ -18,26 +18,8 @@ def seed_everything(seed):
         torch.cuda.manual_seed_all(seed)
 
 
-def device_for(value="auto"):
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu") if value == "auto" else torch.device(value)
-
-
 def move_batch(batch, device):
     return {key: value.to(device) if isinstance(value, torch.Tensor) else value for key, value in batch.items()}
-
-
-def rng_state():
-    return {"python": random.getstate(), "numpy": np.random.get_state(),
-            "torch": torch.get_rng_state(),
-            "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else []}
-
-
-def restore_rng(state):
-    random.setstate(state["python"])
-    np.random.set_state(state["numpy"])
-    torch.set_rng_state(state["torch"].cpu())
-    if state["cuda"] and torch.cuda.is_available():
-        torch.cuda.set_rng_state_all([s.cpu() for s in state["cuda"]])
 
 
 def save_checkpoint(path, payload):

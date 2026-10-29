@@ -14,6 +14,52 @@ from .body import digest_file
 from .codecs import CodecBundle, CodecConfig, codec_payload
 from .data import MotionDataset
 
+def init_swanlab(config, output):
+    if not config.get("use_swanlab", False):
+        return None
+    try:
+        import swanlab
+    except ImportError:
+        print("SwanLab is enabled but swanlab is not installed.", flush=True)
+        return None
+    run_name = config.get("swanlab_run_name") or output.name
+    kwargs = {
+        "project": config.get("swanlab_project", "HOI"),
+        "experiment_name": run_name,
+        "mode": config.get("swanlab_mode", "online"),
+        "config": {k: v for k, v in config.items() if k != "swanlab_api_key"},
+        "logdir": str(output / "swanlog"),
+    }
+    workspace = config.get("swanlab_workspace")
+    if workspace not in (None, "", "null", "None"):
+        kwargs["workspace"] = workspace
+    try:
+        return swanlab.init(**kwargs)
+    except Exception as exc:
+        print(f"SwanLab initialization failed, continuing without SwanLab: {exc}", flush=True)
+        return None
+
+
+def log_swanlab(run, payload, step):
+    if run is not None:
+        run.log(payload, step=step)
+
+
+def finish_swanlab(run):
+    if run is None:
+        return
+    try:
+        run.finish()
+    except Exception:
+        pass
+
+
+_MUTABLE = {
+    "max_steps", "output", "device", "log_every", "cpu_threads", "use_swanlab",
+    "swanlab_project", "swanlab_run_name", "swanlab_mode", "swanlab_workspace",
+    "swanlab_id", "swanlab_resume", "swanlab_api_key",
+}
+
 
 @torch.no_grad()
 def validate(model, loader, device, batches):
@@ -61,8 +107,8 @@ def run(config, resume=None):
         for key in ("support_sha256", "manifest_sha256"):
             if saved[key] != metadata[key]:
                 raise ValueError(f"Resume changed {key}")
-        previous = {k: v for k, v in saved["config"].items() if k not in ("max_steps", "output", "device")}
-        current = {k: v for k, v in config.items() if k not in ("max_steps", "output", "device")}
+        previous = {k: v for k, v in saved["config"].items() if k not in _MUTABLE}
+        current = {k: v for k, v in config.items() if k not in _MUTABLE}
         if saved.get("architecture") != ARCHITECTURE or saved["codec_config"] != asdict(cfg) or previous != current:
             raise ValueError("Resume changed architecture, tokenizer or training semantics")
         model.load_state_dict(saved["model"])
@@ -73,7 +119,16 @@ def run(config, resume=None):
             torch.cuda.set_rng_state_all(saved["cuda_rng"])
     output.mkdir(parents=True, exist_ok=True)
     write_json(output / "config.json", config)
+    swan = init_swanlab(config, output)
     validation = DataLoader(val, batch_size=config.get("batch_size", 32), shuffle=False, num_workers=0)
+    try:
+        return _train(config, model, optimizer, train, device, output, validation, metadata, swan,
+                      step, epoch, skip, best)
+    finally:
+        finish_swanlab(swan)
+
+
+def _train(config, model, optimizer, train, device, output, validation, metadata, swan, step, epoch, skip, best):
     last_saved = None
     while step < config["max_steps"]:
         generator = torch.Generator().manual_seed(config.get("seed", 42) + epoch)
@@ -102,7 +157,9 @@ def run(config, resume=None):
                         if field in state:
                             state[field][unused] = 0
             if step % config.get("log_every", 20) == 0 or step == 1:
-                print(json.dumps({"step": step, "loss": float(loss.detach()), **stats}), flush=True)
+                row = {"step": step, "loss": float(loss.detach()), **stats}
+                print(json.dumps(row), flush=True)
+                log_swanlab(swan, {"train/loss": row["loss"], **{f"train/{k}": v for k, v in stats.items()}}, step)
             if step % config.get("validate_every", 1000) == 0 or step == config["max_steps"]:
                 score = validate(model, validation, device, config.get("validation_batches", 16))
                 improved = score < best
@@ -116,6 +173,7 @@ def run(config, resume=None):
                     save_checkpoint(output / "best.pt", payload)
                 last_saved = step
                 print(json.dumps({"step": step, "validation_loss": score, "best_val": best}), flush=True)
+                log_swanlab(swan, {"val/loss": score, "val/best": best}, step)
             if step >= config["max_steps"]:
                 break
         epoch, skip = epoch + 1, 0
@@ -128,11 +186,27 @@ def main():
     parser.add_argument("--resume")
     parser.add_argument("--max-steps", type=int)
     parser.add_argument("--output")
+    parser.add_argument("--swanlab", dest="use_swanlab", action="store_true")
+    parser.add_argument("--no-swanlab", dest="use_swanlab", action="store_false")
+    parser.add_argument("--swanlab-project")
+    parser.add_argument("--swanlab-run-name")
+    parser.add_argument("--swanlab-workspace")
+    parser.add_argument("--swanlab-mode", choices=("online", "local", "offline", "disabled"))
+    parser.set_defaults(use_swanlab=None)
     args = parser.parse_args()
     config = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
     for key in ("max_steps", "output"):
         if getattr(args, key) is not None:
             config[key] = getattr(args, key)
+    if args.use_swanlab is not None:
+        config["use_swanlab"] = args.use_swanlab
+    for field, key in (("swanlab_project", "swanlab_project"),
+                       ("swanlab_run_name", "swanlab_run_name"),
+                       ("swanlab_workspace", "swanlab_workspace"),
+                       ("swanlab_mode", "swanlab_mode")):
+        value = getattr(args, field)
+        if value is not None:
+            config[key] = value
     print(run(config, args.resume))
 
 

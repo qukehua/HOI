@@ -40,6 +40,80 @@ def contact_scores(pred, target):
 
 
 
+def generation_feature_kind(mode):
+    """TriDi NN feature space for a generated-bit mode (H/O/C)."""
+    human, obj = mode[0] == "1", mode[1] == "1"
+    if human and obj:
+        return "human_joints_object_pose"
+    if human:
+        return "human_joints"
+    if obj:
+        return "object_pose"
+    raise ValueError(f"generation metrics need a human and/or object target; got mode {mode}")
+
+
+def object_pose_features(pose, vertices=None, origin=None):
+    """TriDi object_pose feature: flattened rotation matrix + center, [T,12]."""
+    pose = np.asarray(pose, np.float64)
+    rotation = rotation_matrices(pose)
+    center = pose[:, :3].copy()
+    if vertices is not None:
+        center += np.einsum("tij,j->ti", rotation, np.asarray(vertices).mean(0))
+    if origin is not None:
+        center -= origin
+    return np.concatenate([rotation.reshape(len(pose), 9), center], -1).astype(np.float32)
+
+
+def human_joint_features(joints):
+    """TriDi human_joints feature: pelvis-relative joints[1:], [T,(J-1)*3]."""
+    joints = np.asarray(joints, np.float64)
+    relative = joints - joints[:, :1]
+    return relative[:, 1:].reshape(len(joints), -1).astype(np.float32)
+
+
+def generation_features(kind, joints=None, object_pose=None, *, vertices=None, coordinate_frame="native"):
+    if coordinate_frame not in ("native", "pelvis"):
+        raise ValueError("Unknown generation feature coordinates")
+    origin = None if coordinate_frame == "native" else np.asarray(joints)[:, 0]
+    if kind == "object_pose":
+        return object_pose_features(object_pose, vertices, origin)
+    if kind == "human_joints":
+        return human_joint_features(joints)
+    if kind == "human_joints_object_pose":
+        return np.concatenate([human_joint_features(joints), object_pose_features(object_pose, vertices, origin)], -1)
+    raise ValueError(f"unknown generation feature kind: {kind}")
+
+
+def generation_metrics(generated, reference_test, reference_train):
+    """TriDi Quality of Generated Distribution: 1-NNA / COV / MMD / SD."""
+    generated = np.asarray(generated, np.float32)
+    reference_test = np.asarray(reference_test, np.float32)
+    reference_train = np.asarray(reference_train, np.float32)
+    if min(len(generated), len(reference_test), len(reference_train)) < 1:
+        raise ValueError("generation metrics require nonempty generated/test/train features")
+    if (any(a.ndim != 2 or not np.isfinite(a).all() for a in (generated, reference_test, reference_train))
+            or len({a.shape[1] for a in (generated, reference_test, reference_train)}) != 1
+            or generated.shape[1] == 0 or len(generated) != len(reference_test)):
+        raise ValueError("Need finite, matching feature dimensions and equal generated/reference counts")
+    _, cov_idx = cKDTree(reference_test).query(generated, workers=4)
+    cov = float(len(np.unique(cov_idx)) / len(reference_test))
+    # FAISS IndexFlatL2 in official TriDi returns SQUARED Euclidean distances.
+    mmd_dist, _ = cKDTree(generated).query(reference_test, workers=4)
+    mmd = float(np.square(mmd_dist).mean())
+    sd_dist, _ = cKDTree(reference_train).query(generated, workers=4)
+    sd = float(np.square(sd_dist).mean())
+    pooled = np.concatenate([generated, reference_test], 0)
+    labels = np.concatenate([np.ones(len(generated), np.int64), np.zeros(len(reference_test), np.int64)])
+    _, idx = cKDTree(pooled).query(pooled, k=2, workers=4)
+    # With duplicate vectors, the query itself need not be neighbor zero.
+    other = np.where(idx[:, 0] == np.arange(len(pooled)), idx[:, 1], idx[:, 0])
+    nna = float((labels[other] == labels).mean())
+    return {"1-NNA": nna, "COV": cov, "MMD": mmd, "SD": sd, "distance": "squared_l2",
+            "feature_frames_generated": int(len(generated)),
+            "feature_frames_test": int(len(reference_test)),
+            "feature_frames_train": int(len(reference_train))}
+
+
 def mesh_contacts(body_vertices, object_pose, object_vertices):
     rotation = rotation_matrices(object_pose)
     local = np.einsum("tji,tkj->tki", rotation, body_vertices - object_pose[:, None, :3])

@@ -64,8 +64,10 @@ class ParametricDataset(Dataset):
         self.include_geometry = include_geometry
         self.text_generator = None
         self.windows = []
+        self.loaded = []
         for i, row in enumerate(self.records):
             r = load_record(row["path"], dataset, support_hash)
+            self.loaded.append(r)
             self.windows.extend((i, start, min(start + window, len(r["human_params"])))
                                 for start in range(0, len(r["human_params"]), stride or window))
 
@@ -76,8 +78,7 @@ class ParametricDataset(Dataset):
         """Each training frame once; statistics do not need mesh BPS or text loading."""
         if self.split != "train":
             raise ValueError("Normalization may only use training records")
-        for entry in self.records:
-            record = load_record(entry["path"], self.dataset, self.support_hash)
+        for record in self.loaded:
             for start in range(0, len(record["human_params"]), chunk):
                 values = {key: torch.from_numpy(record[source][start:start + chunk].astype(np.float32))[None]
                           for source, key in (("human_params", "human"), ("object", "object"),
@@ -88,7 +89,7 @@ class ParametricDataset(Dataset):
     def __getitem__(self, index):
         record_index, start, end = self.windows[index]
         entry = self.records[record_index]
-        r = load_record(entry["path"], self.dataset, self.support_hash)
+        r = self.loaded[record_index]
         output = {}
         for source, key in (("human_params", "human"), ("object", "object"),
                             ("surface_contact", "surface_contact")):

@@ -16,7 +16,6 @@ BPS_COUNT = 1024
 BPS_SEED = 20261014
 CONTACT_VERTEX_COUNT = 10000
 GEOMETRY_VERSION = 1
-CONTACT_DEFINITION = "joint_to_mesh_vertex_distance_proxy"
 
 
 def validate_mesh(vertices, faces):
@@ -93,43 +92,3 @@ def mesh_features(path, scale=1.):
     points.setflags(write=False)
     return bps, points
 
-
-def contact_labels(human, obj, points, threshold=.05):
-    """Recompute 22-joint targets from the SAME mesh vertices used by the model.
-
-    All inputs are physical, unnormalized arrays. The stored rotation6d contains
-    the first two rows; recover row three without applying a second world transform.
-    """
-    if not np.isfinite(threshold) or threshold <= 0:
-        raise ValueError("contact threshold must be finite and positive")
-    rows = np.asarray(obj)[..., 3:].reshape(-1, 2, 3)
-    rotation = np.concatenate((rows, np.cross(rows[:, :1], rows[:, 1:2])), axis=1)
-    local = np.einsum("tji,tkj->tki", rotation, np.asarray(human)[..., :3] - np.asarray(obj)[:, None, :3])
-    distance = cKDTree(points).query(local.reshape(-1, 3))[0].reshape(local.shape[:-1])
-    return (distance <= threshold).astype(np.float32)
-
-
-def attach_mesh_geometry(record, path=None, scale=1.):
-    """Return a copy with BPS, contact vertices and matching labels for a clip/scene."""
-    result = dict(record)
-    if path is not None:
-        if "source_object_scale" in record and not np.isclose(float(record["source_object_scale"]), scale):
-            raise ValueError("object mesh scale conflicts with the recorded OMOMO scale")
-        bps, points = mesh_features(str(Path(path).resolve()), float(scale))
-        result.update(object_bps=bps.copy(), object_points=points.copy(),
-                      object_geometry_version=np.int32(GEOMETRY_VERSION),
-                      object_geometry_is_mesh=np.bool_(True))
-    if "object_bps" not in result:
-        raise ValueError("mesh_bps requires an object mesh asset; run scripts/prepare_object_meshes.py")
-    if (np.asarray(result["object_bps"]).shape != (BPS_COUNT, 3)
-            or not np.isfinite(result["object_bps"]).all()
-            or np.asarray(result["object_points"]).shape != (CONTACT_VERTEX_COUNT, 3)
-            or not np.isfinite(result["object_points"]).all()
-            or not bool(result.get("object_geometry_is_mesh", False))
-            or int(result.get("object_geometry_version", -1)) != GEOMETRY_VERSION):
-        raise ValueError("invalid mesh BPS/contact geometry or provenance version")
-    if "human" in result:
-        result["contact"] = contact_labels(result["human"], result["object"], result["object_points"],
-                                           float(result.get("contact_threshold", .05)))
-    result["contact_definition"] = CONTACT_DEFINITION
-    return result

@@ -15,6 +15,9 @@ validate_every: 1000
 validation_batches: 16
 log_every: 20
 reset_unused_every: 100
+use_swanlab: true
+swanlab_project: HOI
+swanlab_mode: online
 codec:
   codebook_size: 512
   latent_dim: 128

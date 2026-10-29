@@ -112,32 +112,6 @@ def aggregate_reports(rows):
     return metrics, primary, micro
 
 
-def assert_comparable(left, right, mode):
-    """Reject accidental cross-mode/dataset/frame/protocol comparisons."""
-    for name, report in (("left", left), ("right", right)):
-        if report.get("protocol", {}).get("version") != VERSION:
-            raise ValueError(f"{name}: old or missing evaluation protocol; re-evaluate predictions")
-        if mode not in report.get("reconstruction", {}):
-            raise ValueError(f"{name}: mode {mode} is missing; 100 and 101 are different tasks")
-    for key in ("dataset", "protocol", "evaluation_frames_sha256", "reference_train_frames_sha256",
-                "reference_values_sha256",
-                "text_conditioned", "support_sha256", "body_assets_sha256", "split", "steps", "seed", "window", "sampler"):
-        if key not in left or key not in right or left[key] != right[key]:
-            raise ValueError(f"Evaluation mismatch: {key}")
-    a, b = left.get("generation", {}).get(mode), right.get("generation", {}).get(mode)
-    if (a is None) != (b is None):
-        raise ValueError("Generation results are missing on one side")
-    if a is not None:
-        for key in ("feature_kind", "reference_train_values_sha256", "distance",
-                    "feature_frames_generated", "feature_frames_test", "feature_frames_train"):
-            if key not in a or key not in b or a[key] != b[key]:
-                raise ValueError(f"Generation evaluation mismatch: {key}")
-    return {"mode": mode, "description": MODE_DESCRIPTIONS[mode],
-            "left": left["reconstruction"][mode], "right": right["reconstruction"][mode],
-            "generation_left": left.get("generation", {}).get(mode),
-            "generation_right": right.get("generation", {}).get(mode)}
-
-
 def add_protocol_arguments(parser):
     parser.add_argument("--profile", choices=("tridi", "native", "auto"), default="tridi",
                         help="tridi: evaluate at 1fps, train reference at 10fps; native: all frames")
@@ -146,4 +120,3 @@ def add_protocol_arguments(parser):
     parser.add_argument("--generation-frame", choices=("pelvis", "native"), default="pelvis",
                         help="Coordinates for NN object centers; human features are always pelvis-relative")
     parser.add_argument("--split", choices=("test", "val"), default="test")
-    parser.add_argument("--predictions-dir", help="Re-score saved mode/*.npz without diffusion; requires summary.json")

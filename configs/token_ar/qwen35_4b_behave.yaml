@@ -6,7 +6,7 @@ seed: 42
 cpu_threads: 4
 window: 120
 stride: 60
-output: runs/token_ar/behave/qwen35_4b_full
+output: runs/behave_10.27
 codecs: runs/token_ar/behave/vq/best.pt
 backbone: Qwen/Qwen3.5-4B-Base
 load_dtype: float32

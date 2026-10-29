@@ -12,8 +12,8 @@ import torch
 from torch import nn
 
 from ..body_metadata import DATASET_MODELS, MODEL_BETAS
-from ..geometry import matrix_to_rotation6d, rotation6d_to_matrix
-from ..smpl_mesh import DEFAULT_MODEL_PATH, _layer, local_rotations, model_asset_path
+from ..geometry import rotation6d_to_matrix
+from ..smpl_mesh import DEFAULT_MODEL_PATH, _layer, model_asset_path
 
 
 def digest_file(path):
@@ -123,23 +123,6 @@ class BodyGeometry(nn.Module):
         if not ((gender == 0) | (gender == 1)).all():
             raise ValueError("Only source male/female assets are configured")
         return vertices, joints
-
-
-def legacy_to_parameters(record, geometry, hand_pose):
-    """Explicit old-checkpoint adapter; static source shape and fixed hand convention."""
-    dataset = geometry.dataset
-    human = np.asarray(record["human"], np.float32)
-    beta = np.asarray(record["betas"], np.float32).reshape(-1)
-    if beta.shape != (beta_count(dataset),):
-        raise ValueError("Missing/wrong native shape for legacy adapter")
-    local = local_rotations(rotation6d_to_matrix(torch.from_numpy(human[..., 3:])).numpy())
-    hands = np.broadcast_to(np.asarray(hand_pose), (len(human), 30, 3, 3))
-    rotation = torch.from_numpy(np.concatenate((local, hands), 1).copy())
-    layer = geometry.layers[str(record["gender"])]
-    rest = layer.root_rest(torch.from_numpy(beta).to(layer.template)).detach().cpu().numpy()
-    translation = human[:, 0, :3] - rest
-    return np.concatenate((np.broadcast_to(beta, (len(human), len(beta))),
-                           matrix_to_rotation6d(rotation).flatten(1).numpy(), translation), -1).astype(np.float32)
 
 
 @torch.no_grad()

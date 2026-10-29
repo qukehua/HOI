@@ -6,8 +6,8 @@ seed: 42
 cpu_threads: 4
 window: 120
 stride: 60
-output: runs/token_ar/omomo/qwen3_8b_last_layers
-codecs: runs/token_ar/omomo/vq/best.pt
+output: runs/token_ar/omomo/qwen3_8b_last_layers_vq_ema
+codecs: runs/token_ar/omomo/vq_residual_ema_512x4096/last.pt
 backbone: Qwen/Qwen3-8B
 load_dtype: float32
 train_scope: last_layers

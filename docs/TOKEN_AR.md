@@ -14,7 +14,9 @@
 4. G：网格经过现有1024锚点 BPS，分为8组，由可训练投影映射成8个连续几何前缀 token。
 5. T：读取清单中的原始文本，用基础语言模型 tokenizer 编码，不读取 CLIP embedding。
 
-每个 VQ-VAE 默认512个码、128维 latent、时间压缩倍率2。三套码本互不共享，BEHAVE／OMOMO也不共享。只在 train 上拟合归一化和训练码本，val 选择检查点。人体／物体使用标准化重建、速度、码本及 commitment 损失；接触使用按正负类别平衡的 BCE、码本及 commitment 损失。记录 perplexity，并可重置近期未用的码；这属于待验证的初始设置，不是论文结果复现。
+当前正式 VQ 配置为 **512个码 × 每码4096维**，隐藏通道512，时间压缩倍率2。三套码本互不共享，BEHAVE／OMOMO也不共享。编码器使用输入卷积、stride=2下采样、3层膨胀时序残差块（dilation=1/3/9）和latent投影；解码器使用反向膨胀顺序的残差块、最近邻上采样和卷积。EMA更新码本计数与向量和（decay=0.99），有效计数小于1的码从本批latent重置；码本不接受Adam梯度。人体／物体使用标准化重建、速度与commitment损失；接触保留正负类别平衡BCE与commitment。只在train拟合归一化和更新权重，按固定预算使用最终`last.pt`，不按总验证损失选`best.pt`。
+
+这些设置参照 [Uni-HOI v2](https://arxiv.org/html/2604.27491v2) 的分模态VQ、训练预算、EMA和重建评价思路，具体时序模块参考 [T2M-GPT编码器/解码器](https://github.com/Mael-zys/T2M-GPT/blob/main/models/encdec.py)、[残差块](https://github.com/Mael-zys/T2M-GPT/blob/main/models/resnet.py) 和 [EMA量化器](https://github.com/Mael-zys/T2M-GPT/blob/main/models/quantize_cnn.py)。本实现不是官方模型的逐层复现：保留本项目325/331维人体、9维物体和690维接触；独立接触VQ与其100万步预算是本项目扩展。`512×4096`按用户要求解释为码数×码维度，不是4096个512维码。旧检查点没有新增结构字段时仍按原512×128、浅层卷积和梯度码本加载。
 
 AR 输入：几何前缀、文本与帧数/fps/性别信息、任务 mask、已知模态的完整 token 序列、未知模态的 missing 标记。目标按时间交错排列，例如111模式为 `H0 O0 C0 H1 O1 C1 ... END`。每次只预测一个 token，随后通过相应 VQ-VAE 解码。长度由请求的帧数确定，不依赖提前生成 END；采样时按当前位置限制到对应模态码本。
 
@@ -81,6 +83,10 @@ pip install -e '.[body,token-ar]'
 # 需先配置匹配 PyTorch 的 CUDA 编译环境；本机 CPU 验证未测试这些内核。
 pip install flash-linear-attention causal-conv1d --no-build-isolation
 
+# 独立评价器：仅train动作与文本训练；冻结后供VQ评价使用，不参与VQ反传。
+python -m unified_hoi.token_ar.train_evaluator --config configs/token_ar/evaluator_behave.yaml
+python -m unified_hoi.token_ar.train_evaluator --config configs/token_ar/evaluator_omomo.yaml
+
 # 第一阶段：独立训练H/O/C的VQ-VAE；此入口目前用单GPU。
 python -m unified_hoi.token_ar.train_codecs --config configs/token_ar/vq_omomo.yaml
 python -m unified_hoi.token_ar.train_codecs --config configs/token_ar/vq_behave.yaml
@@ -96,24 +102,70 @@ accelerate launch --config_file configs/token_ar/accelerate_4gpu.yaml \
 
 BEHAVE把配置后缀换成 `behave`。两个数据集分别训练，不要交换码本。正式步数是实验起点，需根据VQ重建及验证表现调整。现有原生数据无需重新转换；原生人体模型、contact support和对象网格仍需随 `data/` 迁移。
 
-新运行要求输出目录为空；续训需要显式提供检查点。VQ使用 `last.pt`／`best.pt`；AR保存带 `COMPLETE` 标记的 `checkpoint-0001000/` 等目录，其中包括共享模型权重、优化器/RNG状态、tokenizer、VQ检查点和架构/数据校验信息。
+新运行要求输出目录为空；续训需要显式提供检查点。新VQ使用 `last.pt`；AR保存带 `COMPLETE` 标记的 `checkpoint-0001000/` 等目录，其中包括共享模型权重、优化器/RNG状态、tokenizer、VQ检查点和架构/数据校验信息。
 
-2026-10-29：按用户选择，BEHAVE正式配置 `qwen35_4b_behave.yaml` 的新AR实验使用VQ训练完成后保存的 `runs/token_ar/behave/vq/last.pt`。`best.pt` 仍是按原总验证损失保存的诊断记录，不作为这份配置的码本来源。固定训练预算后评估最终权重的重建质量，记录其step与SHA256；启动AR后不要继续覆盖其来源VQ文件。更换码本需要新的AR实验和新的输出目录，不能接着旧AR检查点续训；已有AR结果的复评继续使用检查点内绑定的 `codecs.pt`。
+2026-10-29：两套新VQ输出至 `runs/token_ar/<dataset>/vq_residual_ema_512x4096/last.pt`，所有AR预设均已改用该路径，并使用新的AR输出目录。人体150万步、物体100万步、接触100万步；每次模态更新均使用完整batch128，训练epoch的不足128尾批丢弃。三个模态各有优化器，达到各自预算后停止梯度、EMA和死码重置；最终全局step=1500000，`modality_updates`应为1500000/1000000/1000000。断点保存三份优化器、EMA统计、模态步数和数据/RNG位置。日志中的`validation_loss`仅作数值诊断，不参与选模；最终质量使用下节的独立评价入口。
+
+不能用旧浅层VQ的`last.pt`续训新结构。更换码本需要新的AR实验，已有AR结果的复评继续使用检查点内绑定的`codecs.pt`。固定训练预算后评估最终权重的重建质量，记录step与SHA256；启动AR后不要继续覆盖其来源VQ文件。新版不产生VQ `best.pt`；旧检查点和历史训练分支仍可读取。
 
 ```bash
 python -m unified_hoi.token_ar.train_codecs --config configs/token_ar/vq_omomo.yaml \
-  --resume runs/token_ar/omomo/vq/last.pt
+  --resume runs/token_ar/omomo/vq_residual_ema_512x4096/last.pt
 
 accelerate launch --config_file configs/token_ar/accelerate_qwen35_4gpu.yaml \
   --module unified_hoi.token_ar.train --config configs/token_ar/qwen35_4b_omomo.yaml \
-  --resume runs/token_ar/omomo/qwen35_4b_full/checkpoint-0001000
+  --resume runs/token_ar/omomo/qwen35_4b_full_vq_ema/checkpoint-0001000
 ```
 
 AR续训保持配置和进程数一致，可提高max_steps；VQ码本或清单改变会拒绝续训。`best.json`指向按七模式验证token CE的等权平均选出的单一检查点。这里的验证是teacher-forced预测，不是完整生成的MPJPE、接触F1或物理质量。不能用test挑检查点。
 
-## P0：三套 VQ 的重建基线
+## 新VQ主评价：冻结的动作—文本评价网络
 
-无需重新训练，也不加载 Qwen。`evaluate_codecs` 直接将验证集真实 H/O/C 编码成各自的离散 token，再用冻结的 VQ 解码。默认一次评估100（仅重建人体）、010（仅重建物体）、001（仅重建接触）和111（联合重建）；mask为0的模态保留真实值。这是有真实目标token的重建诊断，不是条件生成成绩，也不是数学上的性能上界。
+流程为 `GT动作 → VQ编码 → token → VQ解码 → 冻结动作编码器`，再与同批GT动作和配对文本比较。不加载Qwen，也不把token CE当作FID。使用验证/测试集全部原生帧率的非重叠窗口，默认window120；不同实验需固定评价器、划分、窗口长度、候选数与随机种子。
+
+项目没有适配原生BEHAVE/OMOMO表示的官方预训练评价器，故按用户选择增加`train_evaluator`：仅train拟合归一化并训练双向GRU动作编码器和文本投影，文本输入来自清单里已有的、与caption对应的冻结CLIP ViT-B/32缓存。四个动作编码器分别处理H、O、C和联合H/O/C；对比学习将它们映射到同一256维、L2归一化的文本空间。同源窗口或完全相同的规范化caption视为多正例，避免当作负例。val只报告检索质量，不反传；预设20,000步/batch64是本项目评价器的起始训练设置，不是Uni-HOI的评价器超参数。固定预算保存最终`last.pt`，加载后eval并冻结所有参数，拒绝评价集与其训练源序列重叠。
+
+```bash
+# 在服务器项目根目录运行；Windows把解释器换成 .venv/Scripts/python.exe。
+.venv/bin/python -m unified_hoi.token_ar.train_evaluator \
+  --config configs/token_ar/evaluator_behave.yaml
+
+# 可独立进行VQ训练；只在下面评价前需要训练好的评价器。
+.venv/bin/python -m unified_hoi.token_ar.train_codecs \
+  --config configs/token_ar/vq_behave.yaml
+
+.venv/bin/python -m unified_hoi.token_ar.evaluate_codecs \
+  --checkpoint runs/token_ar/behave/vq_residual_ema_512x4096/last.pt \
+  --evaluator runs/token_ar/behave/motion_text_evaluator/last.pt \
+  --split val --device cuda:0 --window 120 \
+  --output runs/eval_behave_vq_motion_text
+
+# 评价器续训，max_steps可增加；不要用VQ重建样本训练评价器。
+# python -m unified_hoi.token_ar.train_evaluator --config configs/token_ar/evaluator_behave.yaml \
+#   --resume runs/token_ar/behave/motion_text_evaluator/last.pt
+```
+
+OMOMO替换配置和路径中的`behave`。新VQ检查点配置已保存默认评价器路径，可省略`--evaluator`；缺少权重会报错，不会用随机网络冒充评价器。原有`data/processed/text_features/`缓存需随数据迁移；AR本身仍直接读取原始文本。
+
+动作—文本流程仅使用有文本标注的序列；当前OMOMO清单中train/val/test分别有58/4/5条无文本序列，这些仍参与VQ训练，但不参与评价器训练或动作—文本评分。启动日志、检查点及评价JSON记录相应排除列表/窗口数，不能把该结果称作覆盖无文本序列的完整数据集分数。有caption但缓存缺失/损坏则报错，不能静默替换为零向量。BEHAVE当前无此缺失。
+
+`summary.json → embedding_metrics → human/object/contact/joint`各有`ground_truth`、`reconstructed`和`protocol`：
+
+| 指标 | 本项目定义与读法 |
+| --- | --- |
+| FID ↓ | GT与重建动作的序列embedding均值/协方差距离；GT为0 |
+| Diversity | 随机不同窗口对的动作embedding距离均值；应接近GT，不是越大越好 |
+| R_Precision ↑ | 文本检索配对动作的top1/2/3；默认每个query 32候选、20次固定种子抽样，报告均值及抽样标准差 |
+| Matching_Score ↓ | 配对文本与动作的欧氏距离均值（L2归一化空间） |
+| semantic_R_Precision | 将同源窗口或相同caption也视为匹配的补充诊断，与严格配对结果分开 |
+
+不足32个窗口时采用实际窗口数，并记录随机命中率；相同embedding的排序随机打破平局，防止坍塌网络获得虚假满分。Diversity默认300对，GT/重建共用窗口对和检索候选。先看评价器`validation.json`及GT的R-Precision是否明显高于随机水平；若接近随机，先改善评价器，不能据此判断VQ优劣。小验证集下FID协方差估计不稳定，应固定样本集解释相对变化。
+
+这是**本项目独立训练的BEHAVE/OMOMO评价空间**，不能与Uni-HOI/HumanML3D表格直接比较数值；表示、评价器和检索采样协议均有差异。它也不替代厘米级几何精度与接触一致性诊断，下节保留`--geometry-only`入口。源码测试覆盖检索/FID控制样本、训练/评价隔离、EMA更新与冻结、独立预算、精确续训、真实原生数据的评价器训练及VQ重建评价；这些流程检查不证明正式模型质量。
+
+## P0：三套 VQ 的几何重建诊断
+
+无需重新训练，也不加载 Qwen。`evaluate_codecs --geometry-only` 直接将验证集真实 H/O/C 编码成各自的离散 token，再用冻结的 VQ 解码。一次评估100（仅重建人体）、010（仅重建物体）、001（仅重建接触）和111（联合重建）；mask为0的模态保留真实值。这是有真实目标token的重建诊断，不是条件生成成绩，也不是数学上的性能上界。旧浅层VQ没有指定评价器时仍默认走这条历史诊断路径。
 
 诊断已有 AR 结果时，优先使用**该 AR 检查点自带的 `codecs.pt`**，避免之后更新的VQ权重与原实验码本不同。一次加载的文件已经包含三套独立VQ，无需分别启动三次任务。
 
@@ -124,11 +176,11 @@ AR续训保持配置和进程数一致，可提高max_steps；VQ码本或清单�
   --checkpoint runs/behave_10.27/checkpoint-0001000/codecs.pt \
   --manifest data/processed/behave_parametric.jsonl \
   --contact-support data/parametric_assets/behave/contact_support.npz \
-  --split val --window 120 --eval-fps 1 --device cuda:0 \
+  --geometry-only --split val --window 120 --eval-fps 1 --device cuda:0 \
   --output runs/eval_behave_vq_oracle_step1000
 ```
 
-若只测试第一阶段最终模型，改为 `--checkpoint runs/token_ar/behave/vq/last.pt`。输出目录必须是新目录。冒烟检查可加 `--limit 2` 并另用一个输出目录；正式结论需要不加limit的完整val。默认评估1fps、73关节、690接触顶点、5cm几何接触阈值，沿用AR的 `tridi_metrics_v2` 公式；VQ仍编码原始帧率的完整有效窗口，再抽帧计算指标。
+若测试新第一阶段最终模型，改为 `--checkpoint runs/token_ar/behave/vq_residual_ema_512x4096/last.pt`，仍保留`--geometry-only`。输出目录必须是新目录。冒烟检查可加 `--limit 2` 并另用一个输出目录；正式结论需要不加limit的完整val。默认评估1fps、73关节、690接触顶点、5cm几何接触阈值，沿用AR的 `tridi_metrics_v2` 公式；VQ仍编码原始帧率的完整有效窗口，再抽帧计算指标。
 
 输出 `summary.json` 和 `per_clip.jsonl`，重点读取：
 
@@ -153,13 +205,13 @@ AR续训保持配置和进程数一致，可提高max_steps；VQ码本或清单�
 
 ```bash
 python -m unified_hoi.token_ar.sample \
-  --checkpoint runs/token_ar/omomo/qwen35_4b_full/checkpoint-0001000 \
+  --checkpoint runs/token_ar/omomo/qwen35_4b_full_vq_ema/checkpoint-0001000 \
   --manifest data/processed/omomo_parametric.jsonl --reference REF.npz \
   --mode 101 --frames 120 --text 'Lift the box and put it down.' \
   --device cuda:0 --dtype bfloat16 --output runs/token_ar/sample_101.npz
 
 python -m unified_hoi.token_ar.evaluate \
-  --checkpoint runs/token_ar/omomo/qwen35_4b_full/checkpoint-0001000 \
+  --checkpoint runs/token_ar/omomo/qwen35_4b_full_vq_ema/checkpoint-0001000 \
   --manifest data/processed/omomo_parametric.jsonl --reference REF.npz \
   --prediction runs/token_ar/sample_101.npz --output runs/token_ar/sample_101_metrics.json
 ```

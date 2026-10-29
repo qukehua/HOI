@@ -18,6 +18,7 @@ token-ar = ["transformers>=5.19,<6", "accelerate>=1.15,<2", "safetensors>=0.4"]
 [project.scripts]
 hoi-token-train-vq = "unified_hoi.token_ar.train_codecs:main"
 hoi-token-evaluate-vq = "unified_hoi.token_ar.evaluate_codecs:main"
+hoi-token-train-evaluator = "unified_hoi.token_ar.train_evaluator:main"
 hoi-token-train = "unified_hoi.token_ar.train:main"
 hoi-token-sample = "unified_hoi.token_ar.sample:main"
 hoi-token-evaluate = "unified_hoi.token_ar.evaluate:main"

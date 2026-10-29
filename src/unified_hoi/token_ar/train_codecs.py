@@ -1,6 +1,5 @@
 """Pretrain the three temporal VQ-VAEs on one dataset's train split."""
 import argparse
-from dataclasses import asdict
 import json
 from pathlib import Path
 
@@ -79,6 +78,9 @@ def validate(model, loader, device, batches):
 def run(config, resume=None):
     if config.get("architecture") != ARCHITECTURE:
         raise ValueError("Use a token_ar codec configuration")
+    if "modality_steps" in config:
+        from .vq_training import run_independent
+        return run_independent(config, resume)
     output = Path(config["output"])
     if output.exists() and any(output.iterdir()) and not resume:
         raise FileExistsError("Choose a new codec output directory or explicitly resume")
@@ -109,7 +111,7 @@ def run(config, resume=None):
                 raise ValueError(f"Resume changed {key}")
         previous = {k: v for k, v in saved["config"].items() if k not in _MUTABLE}
         current = {k: v for k, v in config.items() if k not in _MUTABLE}
-        if saved.get("architecture") != ARCHITECTURE or saved["codec_config"] != asdict(cfg) or previous != current:
+        if saved.get("architecture") != ARCHITECTURE or CodecConfig(**saved["codec_config"]) != cfg or previous != current:
             raise ValueError("Resume changed architecture, tokenizer or training semantics")
         model.load_state_dict(saved["model"])
         optimizer.load_state_dict(saved["optimizer"])
@@ -148,7 +150,7 @@ def _train(config, model, optimizer, train, device, output, validation, metadata
             optimizer.step()
             step += 1
             reset_every = config.get("reset_unused_every", 100)
-            if reset_every and step % reset_every == 0:
+            if model.config.quantizer == "gradient" and reset_every and step % reset_every == 0:
                 for key, codec in model.models.items():
                     unused = codec.usage == 0
                     codec.reset_unused(batch[key], batch["valid_frames"])

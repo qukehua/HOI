@@ -1,0 +1,20 @@
+dataset: behave
+manifest: data/processed/behave_parametric.jsonl
+contact_support: data/parametric_assets/behave/contact_support.npz
+output: runs/token_ar/behave/motion_text_evaluator
+device: cuda:0
+seed: 42
+cpu_threads: 4
+window: 120
+stride: 60
+batch_size: 64
+max_steps: 20000
+learning_rate: 0.0001
+weight_decay: 0.01
+validate_every: 1000
+log_every: 20
+model:
+  width: 256
+  embedding_dim: 256
+  layers: 2
+  temperature: 0.07

@@ -4,6 +4,8 @@
 
 模型、mask、四卡配置、训练与推理命令见 [Token-AR 说明](docs/TOKEN_AR.md)。
 
+新VQ使用时序残差网络与EMA量化，每路码本为**512个4096维向量**，batch128；人体训练150万步、物体和接触各100万步，达到预算后冻结，统一使用最终`last.pt`。VQ主评价先重建动作，再由独立训练并冻结的动作—文本评价器计算FID、Diversity、R-Precision和Matching Score；评价器仅在本数据集train上学习，结果不与Uni-HOI官方数值直接比较。原几何诊断保留为`evaluate_codecs --geometry-only`。
+
 可选的第三阶段使用小型连续修正网络改善AR粗生成的人体、物体和接触几何。它以真实AR采样缓存训练，冻结Qwen/VQ，并保持已知模态不变；缓存、训练及`--refiner`评估命令见 [连续几何修正](docs/TOKEN_AR.md#可选第三阶段连续几何修正2026-10-29)。尚未完成正式4B检查点的修正训练和效果评估。
 
 | 数据集 | 人体 H | 物体 O | 接触 C |
@@ -14,8 +16,14 @@
 两个数据集的 VQ 码本和 AR 检查点互相隔离。物体几何使用网格 BPS，作为8个几何前缀 token。
 
 ```bash
+# 独立训练评价器（仅train）；需保留清单引用的CLIP文本缓存。
+python -m unified_hoi.token_ar.train_evaluator --config configs/token_ar/evaluator_behave.yaml
 # 第一阶段：VQ-VAE
 python -m unified_hoi.token_ar.train_codecs --config configs/token_ar/vq_behave.yaml
+# VQ动作—文本重建评价；自动读取配置中的冻结评价器last.pt。
+python -m unified_hoi.token_ar.evaluate_codecs \
+  --checkpoint runs/token_ar/behave/vq_residual_ema_512x4096/last.pt \
+  --split val --device cuda:0 --output runs/eval_behave_vq_motion_text
 # 第二阶段：Qwen3.5-4B 四卡全参数
 accelerate launch --config_file configs/token_ar/accelerate_qwen35_4gpu.yaml \
   --module unified_hoi.token_ar.train --config configs/token_ar/qwen35_4b_behave.yaml
@@ -29,6 +37,7 @@ python -m unified_hoi.token_ar.benchmark --checkpoint runs/behave_10.27/checkpoi
 `data/` 已精简为模型依赖，完整说明见 [data/README.md](data/README.md)。Token-AR 读取：
 
 - `processed/*_parametric/` 及对应 `.jsonl` 清单：原生参数数据。
+- `processed/text_features/`：独立评价器使用的冻结CLIP文本缓存；AR直接读取原始caption。
 - `processed/object_meshes/`：物体网格（BPS 几何条件）。
 - `parametric_assets/<dataset>/contact_support.npz`：690个接触表面点索引。
 - `smplx_models/smplh/`、`smplx_models/smplx/`：原生男女身体模型。

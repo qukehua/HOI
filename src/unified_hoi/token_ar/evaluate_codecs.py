@@ -38,7 +38,8 @@ def usage_statistics(counts):
 @torch.no_grad()
 def evaluate_codecs(checkpoint, output, *, manifest=None, contact_support=None, body_models="data/smplx_models",
                     split="val", window=120, modes=("100", "010", "001", "111"), device="cpu",
-                    profile="tridi", eval_fps=None, limit=None):
+                    profile="tridi", eval_fps=None, limit=None, evaluator=None, geometry_only=False,
+                    seed=42, candidates=32, repeats=20, diversity_pairs=300):
     if (split not in ("val", "test") or window < 1 or (limit is not None and limit < 1)
             or not modes or any(m not in MODES for m in modes) or len(set(modes)) != len(modes)):
         raise ValueError("Require val/test, positive window/limit and distinct H/O/C masks")
@@ -55,6 +56,14 @@ def evaluate_codecs(checkpoint, output, *, manifest=None, contact_support=None, 
         raise ValueError("Specify --manifest; this VQ checkpoint has no saved manifest path")
     contact_support = contact_support or config.get("contact_support") or (
         f"data/parametric_assets/{dataset_name}/contact_support.npz")
+    if not geometry_only and (evaluator or config.get("motion_text_evaluator")):
+        from .evaluate_motion_text import evaluate_motion_text
+        return evaluate_motion_text(codecs, saved, checkpoint, output,
+            evaluator=evaluator or config["motion_text_evaluator"], manifest=manifest, contact_support=contact_support,
+            split=split, window=window, limit=limit, device=device, seed=seed,
+            candidates=candidates, repeats=repeats, diversity_pairs=diversity_pairs)
+    if not geometry_only and codecs.config.network == "residual":
+        raise ValueError("New VQ evaluation requires --evaluator; use --geometry-only for the geometry diagnostic")
     support_hash = digest_file(contact_support)
     if saved.get("support_sha256") != support_hash:
         raise ValueError("VQ checkpoint/contact support mismatch")
@@ -179,11 +188,18 @@ def main():
     parser.add_argument("--profile", choices=("tridi", "native"), default="tridi")
     parser.add_argument("--eval-fps", type=float, help="Default: tridi 1fps; native all frames (0)")
     parser.add_argument("--limit", type=int, help="First N windows for smoke tests only; omit for full evaluation")
+    parser.add_argument("--evaluator", help="Frozen native motion-text evaluator; defaults to the VQ config path")
+    parser.add_argument("--geometry-only", action="store_true", help="Use the earlier MPJPE/contact diagnostic instead")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--candidates", type=int, default=32)
+    parser.add_argument("--repeats", type=int, default=20)
+    parser.add_argument("--diversity-pairs", type=int, default=300)
     args = vars(parser.parse_args())
     torch.set_num_threads(4)
     summary = evaluate_codecs(**args)
-    print(json.dumps({"output": args["output"], "reconstruction": summary["reconstruction"],
-                      "contact_diagnostics": summary["contact_diagnostics"]}, allow_nan=False))
+    print(json.dumps({"output": args["output"], "reconstruction": summary.get("reconstruction"),
+                      "embedding_metrics": summary.get("embedding_metrics"),
+                      "contact_diagnostics": summary.get("contact_diagnostics")}, allow_nan=False))
 
 
 if __name__ == "__main__":

@@ -6,19 +6,29 @@ seed: 42
 cpu_threads: 4
 window: 120
 stride: 60
-output: runs/token_ar/omomo/vq
+output: runs/token_ar/omomo/vq_residual_ema_512x4096
 device: cuda:0
-batch_size: 32
-max_steps: 100000
+batch_size: 128
+max_steps: 1500000
+modality_steps:
+  human: 1500000
+  object: 1000000
+  contact: 1000000
+motion_text_evaluator: runs/token_ar/omomo/motion_text_evaluator/last.pt
 learning_rate: 0.0002
 validate_every: 1000
 validation_batches: 16
 log_every: 20
-reset_unused_every: 100
 codec:
   codebook_size: 512
-  latent_dim: 128
-  width: 256
+  latent_dim: 4096
+  width: 512
+  network: residual
+  quantizer: ema
+  depth: 3
+  dilation_growth: 3
+  ema_decay: 0.99
+  ema_reset_threshold: 1.0
   stride: 2
   commitment_weight: 0.25
   velocity_weight: 0.1

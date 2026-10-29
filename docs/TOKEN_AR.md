@@ -98,6 +98,8 @@ BEHAVE把配置后缀换成 `behave`。两个数据集分别训练，不要交�
 
 新运行要求输出目录为空；续训需要显式提供检查点。VQ使用 `last.pt`／`best.pt`；AR保存带 `COMPLETE` 标记的 `checkpoint-0001000/` 等目录，其中包括共享模型权重、优化器/RNG状态、tokenizer、VQ检查点和架构/数据校验信息。
 
+2026-10-29：按用户选择，BEHAVE正式配置 `qwen35_4b_behave.yaml` 的新AR实验使用VQ训练完成后保存的 `runs/token_ar/behave/vq/last.pt`。`best.pt` 仍是按原总验证损失保存的诊断记录，不作为这份配置的码本来源。固定训练预算后评估最终权重的重建质量，记录其step与SHA256；启动AR后不要继续覆盖其来源VQ文件。更换码本需要新的AR实验和新的输出目录，不能接着旧AR检查点续训；已有AR结果的复评继续使用检查点内绑定的 `codecs.pt`。
+
 ```bash
 python -m unified_hoi.token_ar.train_codecs --config configs/token_ar/vq_omomo.yaml \
   --resume runs/token_ar/omomo/vq/last.pt
@@ -113,7 +115,7 @@ AR续训保持配置和进程数一致，可提高max_steps；VQ码本或清单�
 
 无需重新训练，也不加载 Qwen。`evaluate_codecs` 直接将验证集真实 H/O/C 编码成各自的离散 token，再用冻结的 VQ 解码。默认一次评估100（仅重建人体）、010（仅重建物体）、001（仅重建接触）和111（联合重建）；mask为0的模态保留真实值。这是有真实目标token的重建诊断，不是条件生成成绩，也不是数学上的性能上界。
 
-诊断已有 AR 结果时，优先使用**该 AR 检查点自带的 `codecs.pt`**，避免之后更新的 `vq/best.pt` 与原实验码本不同。一次加载的文件已经包含三套独立VQ，无需分别启动三次任务。
+诊断已有 AR 结果时，优先使用**该 AR 检查点自带的 `codecs.pt`**，避免之后更新的VQ权重与原实验码本不同。一次加载的文件已经包含三套独立VQ，无需分别启动三次任务。
 
 在服务器项目根目录运行（Windows使用 `.venv/Scripts/python.exe`）：
 
@@ -126,7 +128,7 @@ AR续训保持配置和进程数一致，可提高max_steps；VQ码本或清单�
   --output runs/eval_behave_vq_oracle_step1000
 ```
 
-若只测试第一阶段模型，改为 `--checkpoint runs/token_ar/behave/vq/best.pt`。输出目录必须是新目录。冒烟检查可加 `--limit 2` 并另用一个输出目录；正式结论需要不加limit的完整val。默认评估1fps、73关节、690接触顶点、5cm几何接触阈值，沿用AR的 `tridi_metrics_v2` 公式；VQ仍编码原始帧率的完整有效窗口，再抽帧计算指标。
+若只测试第一阶段最终模型，改为 `--checkpoint runs/token_ar/behave/vq/last.pt`。输出目录必须是新目录。冒烟检查可加 `--limit 2` 并另用一个输出目录；正式结论需要不加limit的完整val。默认评估1fps、73关节、690接触顶点、5cm几何接触阈值，沿用AR的 `tridi_metrics_v2` 公式；VQ仍编码原始帧率的完整有效窗口，再抽帧计算指标。
 
 输出 `summary.json` 和 `per_clip.jsonl`，重点读取：
 

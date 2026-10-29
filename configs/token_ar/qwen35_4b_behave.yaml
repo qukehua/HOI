@@ -7,7 +7,8 @@ cpu_threads: 4
 window: 120
 stride: 60
 output: runs/behave_10.27
-codecs: runs/token_ar/behave/vq/best.pt
+# Use the final VQ checkpoint for new AR runs; changed codebooks cannot resume an old AR run.
+codecs: runs/token_ar/behave/vq/last.pt
 backbone: Qwen/Qwen3.5-4B-Base
 load_dtype: float32
 train_scope: full

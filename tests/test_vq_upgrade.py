@@ -12,6 +12,8 @@ import torch
 
 from unified_hoi.data import read_manifest
 from unified_hoi.token_ar.body import digest_file
+from unified_hoi.geometry import matrix_to_rotation6d, rotation6d_to_matrix
+from unified_hoi.token_ar.canonical import restore_scene, to_canonical
 from unified_hoi.token_ar.codecs import CodecBundle, CodecConfig, MotionVQVAE, codec_payload, load_codecs
 from unified_hoi.token_ar.embedding_metrics import embedding_scores, frechet_distance
 from unified_hoi.token_ar.evaluate_codecs import evaluate_codecs
@@ -60,6 +62,50 @@ class TemporalEMATests(unittest.TestCase):
         torch.testing.assert_close(first, second, rtol=0, atol=0)
         for k, v in codec.state_dict().items():
             torch.testing.assert_close(v, snapshot[k], rtol=0, atol=0)
+
+    def test_scene_anchor_roundtrip_and_geometric_loss(self):
+        identity = torch.tensor([1., 0., 0., 0., 1., 0.])
+        yaw = torch.tensor([.7, -1.2])
+        cosine, sine = torch.cos(yaw), torch.sin(yaw)
+        zeros, ones = torch.zeros_like(cosine), torch.ones_like(cosine)
+        rotation = torch.stack((
+            torch.stack((cosine, zeros, sine), -1),
+            torch.stack((zeros, ones, zeros), -1),
+            torch.stack((-sine, zeros, cosine), -1),
+        ), -2)
+        pose = identity.view(1, 1, 1, 6).expand(2, 6, 52, 6).clone()
+        pose[:, :, 0] = matrix_to_rotation6d(rotation)[:, None]
+        human = torch.cat((torch.zeros(2, 6, 10), pose.flatten(2), torch.randn(2, 6, 3)), -1)
+        obj = torch.cat((torch.randn(2, 6, 3), identity.view(1, 1, 6).expand(2, 6, 6).clone()), -1)
+        canonical_human, canonical_obj, anchor = to_canonical(human, obj, "behave")
+        restored_human, restored_obj = restore_scene(canonical_human, canonical_obj, anchor, "behave")
+        torch.testing.assert_close(restored_human, human, atol=1e-4, rtol=1e-4)
+        torch.testing.assert_close(restored_obj, obj, atol=1e-4, rtol=1e-4)
+        self.assertLess(canonical_human[:, 0, -3].abs().max(), 1e-4)
+        self.assertLess(canonical_human[:, 0, -1].abs().max(), 1e-4)
+        root = rotation6d_to_matrix(canonical_human[:, 0, 10:16])
+        self.assertLess(root[:, 0, 2].abs().max(), 1e-4)
+        config = CodecConfig(dataset="behave", network="residual", quantizer="ema", width=8,
+                             codebook_size=4, latent_dim=4, canonical_scene=True, commitment_weight=.02,
+                             velocity_weight=.5)
+        codec = MotionVQVAE(325, config, role="human")
+        loss, detail = codec.loss(human, torch.ones(2, 6, dtype=torch.bool))
+        loss.backward()
+        self.assertTrue(torch.isfinite(loss))
+        self.assertGreater(float(detail["root_deg"]), 0)
+        self.assertIsNone(codec.codebook.weight.grad)
+        heavier = CodecConfig(dataset="behave", network="residual", quantizer="ema", width=8,
+                              codebook_size=4, latent_dim=4, canonical_scene=True, body_weight=1.)
+        other = MotionVQVAE(325, heavier, role="human")
+        other.load_state_dict(codec.state_dict())
+        values = torch.ones(2, 6, dtype=torch.bool)
+        loss_low, _ = codec.loss(human, values)
+        loss_high, _ = other.loss(human, values)
+        self.assertGreater(float(loss_high.detach()), float(loss_low.detach()))
+        contact = MotionVQVAE(4, config, contact=True)
+        labels = torch.randint(0, 2, (2, 6, 4), dtype=torch.float32)
+        _, contact_detail = contact.loss(labels, values)
+        self.assertTrue(0 <= float(contact_detail["f1"]) <= 1)
 
     def test_legacy_checkpoint_without_new_fields(self):
         root = Path("runs").resolve()

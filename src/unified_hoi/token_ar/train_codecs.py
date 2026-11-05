@@ -61,18 +61,28 @@ _MUTABLE = {
 
 
 @torch.no_grad()
-def validate(model, loader, device, batches):
+def validate_report(model, loader, device, batches):
+    """Window-weighted means. `loss` is the summed diagnostic; geometry keys select checkpoints."""
     model.eval()
-    total, count = 0., 0
+    totals, count = {}, 0
     for i, batch in enumerate(loader):
         if i >= batches:
             break
-        loss, _ = model.loss(move_batch(batch, device))
-        total += float(loss) * len(batch["human"])
-        count += len(batch["human"])
+        geometry = model.scene_geometry[0] if getattr(model, "scene_geometry", None) else None
+        loss, stats = model.loss(move_batch(batch, device), geometry=geometry)
+        windows = len(batch["human"])
+        count += windows
+        totals["loss"] = totals.get("loss", 0.) + float(loss) * windows
+        for key, value in stats.items():
+            totals[key] = totals.get(key, 0.) + float(value) * windows
     if not count:
         raise ValueError("Empty codec validation split")
-    return total / count
+    return {key: value / count for key, value in totals.items()}
+
+
+@torch.no_grad()
+def validate(model, loader, device, batches):
+    return validate_report(model, loader, device, batches)["loss"]
 
 
 def run(config, resume=None):

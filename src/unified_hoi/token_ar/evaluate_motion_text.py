@@ -35,9 +35,13 @@ def evaluate_motion_text(codecs, saved, checkpoint, output, *, evaluator, manife
     for index, batch in enumerate(loader):
         batch = move_batch(batch, device)
         n = int(batch["valid_frames"].sum())
-        tokens = codecs.encode(batch)
+        view, anchor = codecs.canonical_view(batch)
+        tokens = codecs.encode_view(view)
         values = {k: codecs.models[k].decode(tokens[k][0], n) for k in MODALITIES}
-        values["human"], values["object"] = canonicalize(values["human"], values["object"], codecs.config.dataset)
+        if anchor is None:
+            values["human"], values["object"] = canonicalize(values["human"], values["object"], codecs.config.dataset)
+        else:
+            values["human"], values["object"] = codecs.restore(values["human"], values["object"], anchor)
         reconstructed = {k: v[None] for k, v in values.items()}
         reconstructed.update(valid_frames=torch.ones(1, n, dtype=torch.bool, device=device), fps=batch["fps"])
         for view in VIEWS:

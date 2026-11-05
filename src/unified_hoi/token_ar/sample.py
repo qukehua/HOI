@@ -12,6 +12,7 @@ from ..runtime import move_batch
 from . import ARCHITECTURE, MODALITIES, MODES
 from .body import BodyGeometry, digest_file, standard_parameters
 from .checkpoint import load_run
+from .canonical import restore_scene
 from .codecs import canonicalize, load_codecs
 from .data import MotionDataset, load_record
 from .refinement import check_sampler, load_refiner
@@ -23,8 +24,9 @@ def complete(model, codecs, builder, batch, mode, text=None, seed=42, temperatur
         raise ValueError("Sampling expects one window and a valid H/O/C mask")
     n = int(batch["valid_frames"][0].sum())
     token_count = (n + codecs.config.stride - 1) // codecs.config.stride
+    view, anchor = codecs.canonical_view(batch)
     # Do not even run the encoders on unavailable ground-truth modalities.
-    known = {k: codecs.models[k].encode(batch[k], batch["valid_frames"])[0].tolist()
+    known = {k: codecs.models[k].encode(view[k], view["valid_frames"])[0].tolist()
              for k, bit in zip(MODALITIES, mode) if bit == "0"}
     prompt = batch["text"][0] if text is None else text
     example, order = builder.example(known, mode, prompt, n, float(batch["fps"][0]),
@@ -35,6 +37,14 @@ def complete(model, codecs, builder, batch, mode, text=None, seed=42, temperatur
     for k, bit in zip(MODALITIES, mode):
         values[k] = (codecs.models[k].decode(torch.tensor(generated[k], device=batch[k].device), n)
                      if bit == "1" else batch[k][0, :n].clone())
+    if anchor is not None and "1" in mode[:2]:
+        human_in = values["human"] if mode[0] == "1" else view["human"][0, :n]
+        obj_in = values["object"] if mode[1] == "1" else view["object"][0, :n]
+        human_w, obj_w = restore_scene(human_in[None], obj_in[None], anchor, codecs.config.dataset)
+        if mode[0] == "1":
+            values["human"] = human_w[0]
+        if mode[1] == "1":
+            values["object"] = obj_w[0]
     h, o = canonicalize(values["human"], values["object"], codecs.config.dataset)
     if mode[0] == "1":
         values["human"] = h

@@ -90,14 +90,18 @@ def evaluate_codecs(checkpoint, output, *, manifest=None, contact_support=None, 
         gender_name = "male" if int(batch["gender"][0]) else "female"
         if batch["body_model_sha256"][0] != geometry.layers[gender_name].asset_hash:
             raise ValueError("Native record/body model mismatch")
-        encoded = codecs.encode(batch)
+        view, anchor = codecs.canonical_view(batch)
+        encoded = codecs.encode_view(view)
         for key in MODALITIES:
             counts[key] += np.bincount(encoded[key][0].cpu().numpy(), minlength=len(counts[key]))
         selected, ids = window_selection(plan[record_index], start, end)
         if not len(selected):
             continue
         decoded = {k: codecs.models[k].decode(encoded[k][0], n) for k in MODALITIES}
-        decoded["human"], decoded["object"] = canonicalize(decoded["human"], decoded["object"], dataset_name)
+        if anchor is None:
+            decoded["human"], decoded["object"] = canonicalize(decoded["human"], decoded["object"], dataset_name)
+        else:
+            decoded["human"], decoded["object"] = codecs.restore(decoded["human"], decoded["object"], anchor)
         if any(not torch.isfinite(v).all() for v in decoded.values()):
             raise FloatingPointError("Nonfinite VQ reconstruction")
         entry = dataset.records[record_index]

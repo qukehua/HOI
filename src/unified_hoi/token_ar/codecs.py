@@ -8,6 +8,7 @@ from torch.nn import functional as F
 from ..geometry import matrix_to_rotation6d, rotation6d_to_matrix
 from . import ARCHITECTURE, MODALITIES
 from .body import beta_count, human_dim
+from .canonical import restore_scene, to_canonical
 
 
 @dataclass
@@ -19,6 +20,9 @@ class CodecConfig:
     stride: int = 2
     commitment_weight: float = .25
     velocity_weight: float = .1
+    canonical_scene: bool = False
+    joint_weight: float = 1.
+    body_weight: float = .1
     network: str = "legacy"
     quantizer: str = "gradient"
     depth: int = 3
@@ -37,6 +41,10 @@ class CodecConfig:
             raise ValueError("Invalid residual/EMA configuration")
         if self.ema_reset_threshold < 0 or (self.network == "residual" and self.stride != 2):
             raise ValueError("Residual tokenizer currently requires stride=2 and a nonnegative reset threshold")
+        if self.canonical_scene and (self.network != "residual" or self.quantizer != "ema"):
+            raise ValueError("Canonical scene training uses the residual EMA tokenizer")
+        if self.joint_weight < 0 or self.body_weight < 0:
+            raise ValueError("Joint and body loss weights must be nonnegative")
 
 
 class TemporalResidual(nn.Module):
@@ -58,9 +66,9 @@ def valid_lengths(valid):
 
 
 class MotionVQVAE(nn.Module):
-    def __init__(self, dim, config, contact=False):
+    def __init__(self, dim, config, contact=False, role="generic"):
         super().__init__()
-        self.config, self.contact = config, contact
+        self.config, self.contact, self.role = config, contact, role
         w, d, s = config.width, config.latent_dim, config.stride
         self.encoder = nn.Sequential(nn.Conv1d(dim, w, s, stride=s), nn.GELU(),
                                      nn.Conv1d(w, w, 3, padding=1), nn.GELU(), nn.Conv1d(w, d, 1))
@@ -115,9 +123,11 @@ class MotionVQVAE(nn.Module):
         value = self._decode(self.codebook(indices), length)
         return value.sigmoid() if self.contact else value
 
-    def loss(self, values, valid):
+    def loss(self, values, valid, gender=None, geometry=None):
         if self.config.network == "residual" or self.config.quantizer == "ema":
-            return self._grouped_loss(values, valid)
+            return self._grouped_loss(values, valid, gender=gender, geometry=geometry)
+        if self.config.canonical_scene:
+            raise ValueError("Canonical scene training uses the residual EMA tokenizer")
         latent = [self._latent(x[:n]) for x, n in zip(values, valid_lengths(valid))]
         flat = torch.cat(latent)
         if self.training and not bool(self.initialized):
@@ -151,7 +161,57 @@ class MotionVQVAE(nn.Module):
         loss = reconstruction + vq + self.config.velocity_weight * vel
         return loss, {"reconstruction": reconstruction, "vq": vq, "velocity": vel, "perplexity": perplexity}
 
-    def _grouped_loss(self, values, valid):
+    def _rotation_angle(self, pred, target):
+        relative = rotation6d_to_matrix(pred).transpose(-1, -2) @ rotation6d_to_matrix(target)
+        cosine = (relative.diagonal(dim1=-2, dim2=-1).sum(-1) - 1) * .5
+        return torch.acos(cosine.clamp(-1 + 1e-6, 1 - 1e-6))
+
+    def _delta_angle(self, rot6):
+        rotation = rotation6d_to_matrix(rot6)
+        relative = rotation[:, 1:] @ rotation[:, :-1].transpose(-1, -2)
+        cosine = (relative.diagonal(dim1=-2, dim2=-1).sum(-1) - 1) * .5
+        return torch.acos(cosine.clamp(-1 + 1e-6, 1 - 1e-6))
+
+    def _scene_errors(self, pred, target, gender, geometry):
+        """Per-sample geometric errors. Hands are down-weighted; root is not averaged away."""
+        if pred.shape[1] > 1:
+            speed = (pred[:, 1:, -3:] - pred[:, :-1, -3:] - (target[:, 1:, -3:] - target[:, :-1, -3:])).norm(dim=-1).mean(1)
+        else:
+            speed = pred.new_zeros(pred.shape[0])
+        if self.role == "object":
+            angle = self._rotation_angle(pred[..., 3:], target[..., 3:]).mean(1)
+            if pred.shape[1] > 1:
+                speed = speed + (self._delta_angle(pred[..., 3:]) - self._delta_angle(target[..., 3:])).abs().mean(1)
+            translation = (pred[..., :3] - target[..., :3]).norm(dim=-1).mean(1)
+            loss = angle + translation
+            extra = {"rot_deg": torch.rad2deg(angle.mean()), "trans_cm": translation.mean() * 100}
+            return loss, speed, extra
+        n = beta_count(self.config.dataset)
+        root = self._rotation_angle(pred[..., n:n + 6], target[..., n:n + 6]).mean(1)
+        body = self._rotation_angle(pred[..., n + 6:n + 132].reshape(*pred.shape[:2], 21, 6),
+                                    target[..., n + 6:n + 132].reshape(*target.shape[:2], 21, 6)).mean((1, 2))
+        if pred.shape[1] > 1:
+            speed = speed + (self._delta_angle(pred[..., n:n + 6]) - self._delta_angle(target[..., n:n + 6])).abs().mean(1)
+            speed = speed + self.config.body_weight * (
+                self._delta_angle(pred[..., n + 6:n + 132].reshape(*pred.shape[:2], 21, 6))
+                - self._delta_angle(target[..., n + 6:n + 132].reshape(*target.shape[:2], 21, 6))).abs().mean((1, 2))
+        translation = (pred[..., -3:] - target[..., -3:]).norm(dim=-1).mean(1)
+        beta = (pred[..., :n] - target[..., :n]).square().mean((1, 2))
+        hands = (pred[..., n + 132:-3] - target[..., n + 132:-3]).square().mean((1, 2))
+        joints = pred.new_zeros(pred.shape[0])
+        if geometry is not None and gender is not None:
+            pred_j, target_j = pred[:, ::4], target[:, ::4]
+            _, predicted = geometry(pred_j, gender)
+            with torch.no_grad():
+                _, truth = geometry(target_j.detach(), gender)
+            delta = (predicted - predicted[..., :1, :]) - (truth - truth[..., :1, :])
+            joints = delta.norm(dim=-1).mean((1, 2))
+        loss = root + self.config.body_weight * body + translation + .1 * beta + .01 * hands + self.config.joint_weight * joints
+        extra = {"root_deg": torch.rad2deg(root.mean()), "body_deg": torch.rad2deg(body.mean()),
+                 "trans_cm": translation.mean() * 100, "joint_cm": joints.mean() * 100}
+        return loss, speed, extra
+
+    def _grouped_loss(self, values, valid, gender=None, geometry=None):
         # Group by exact valid length: convolutions never see padded frames. Full windows
         # share one batched convolution instead of 128 separate forward graphs.
         lengths = valid_lengths(valid)
@@ -163,8 +223,8 @@ class MotionVQVAE(nn.Module):
             if n % self.config.stride:
                 x = F.pad(x, (0, (-n) % self.config.stride), mode="replicate")
             z = self.encoder(x).transpose(1, 2)
-            groups.append((target, z, n))
-        flat = torch.cat([z.reshape(-1, z.shape[-1]) for _, z, _ in groups])
+            groups.append((target, z, n, index))
+        flat = torch.cat([z.reshape(-1, z.shape[-1]) for _, z, _, _ in groups])
         if self.training and not bool(self.initialized):
             with torch.no_grad():
                 indices = torch.randperm(len(flat), device=flat.device)
@@ -178,7 +238,8 @@ class MotionVQVAE(nn.Module):
                 self.initialized.fill_(True)
         flat_ids = self._nearest(flat)
         rec, quant, velocity, offset = [], [], [], 0
-        for target, z, n in groups:
+        extras, contact_counts = [], []
+        for target, z, n, index in groups:
             count = z.shape[0] * z.shape[1]
             q = self.codebook(flat_ids[offset:offset + count]).reshape_as(z)
             offset += count
@@ -194,6 +255,16 @@ class MotionVQVAE(nn.Module):
                 part = (error * positive).sum((1, 2)) / np_.clamp_min(1)
                 part = part + (error * ~positive).sum((1, 2)) / nn_.clamp_min(1)
                 rec.append(part / ((np_ > 0).float() + (nn_ > 0).float()))
+                predicted = pred.detach().sigmoid() >= .5
+                contact_counts.append(((predicted & positive).sum(), (predicted & ~positive).sum(),
+                                       (~predicted & positive).sum()))
+            elif self.config.canonical_scene and self.role in ("human", "object"):
+                pred = pred * self.std + self.mean
+                gender_group = None if gender is None else gender[index]
+                term, speed, extra = self._scene_errors(pred, target, gender_group, geometry)
+                rec.append(term)
+                velocity.append(speed)
+                extras.append(extra)
             else:
                 pred = pred * self.std + self.mean
                 rec.append(((pred - target) / self.std).square().mean((1, 2)))
@@ -210,8 +281,15 @@ class MotionVQVAE(nn.Module):
             if self.config.quantizer == "ema":
                 resets = self._update_ema(flat.detach(), flat_ids, counts)
         loss = reconstruction + vq + self.config.velocity_weight * vel
-        return loss, {"reconstruction": reconstruction, "vq": vq, "velocity": vel,
-                      "perplexity": perplexity, "resets": loss.new_tensor(resets)}
+        detail = {"reconstruction": reconstruction, "vq": vq, "velocity": vel,
+                  "perplexity": perplexity, "resets": loss.new_tensor(resets)}
+        if extras:
+            for key in extras[0]:
+                detail[key] = torch.stack([item[key] for item in extras]).mean().detach()
+        if contact_counts:
+            tp, fp, fn = [torch.stack(part).sum() for part in zip(*contact_counts)]
+            detail["f1"] = (2 * tp) / (2 * tp + fp + fn).clamp_min(1)
+        return loss, detail
 
     @torch.no_grad()
     def _update_ema(self, flat, ids, counts):
@@ -248,12 +326,28 @@ class CodecBundle(nn.Module):
         super().__init__()
         self.config = config
         dims = {"human": human_dim(config.dataset), "object": 9, "contact": 690}
-        self.models = nn.ModuleDict({k: MotionVQVAE(dim, config, k == "contact") for k, dim in dims.items()})
+        self.models = nn.ModuleDict({k: MotionVQVAE(dim, config, k == "contact", role=k) for k, dim in dims.items()})
+
+    def canonical_view(self, batch):
+        if not self.config.canonical_scene:
+            return batch, None
+        human, obj, anchor = to_canonical(batch["human"], batch["object"], self.config.dataset)
+        view = dict(batch)
+        view["human"], view["object"] = human, obj
+        return view, anchor
+
+    def restore(self, human, obj, anchor):
+        human, obj = restore_scene(human, obj, anchor, self.config.dataset)
+        return canonicalize(human, obj, self.config.dataset)
 
     @torch.no_grad()
     def fit_normalization(self, dataset):
         count, sums, squares = 0, {}, {}
-        for batch in dataset.normalization_batches():
+        if self.config.canonical_scene:
+            batches = self._canonical_windows(dataset)
+        else:
+            batches = dataset.normalization_batches()
+        for batch in batches:
             count += int(batch["valid_frames"].sum())
             for key in ("human", "object"):
                 values = batch[key][batch["valid_frames"]].double()
@@ -266,14 +360,32 @@ class CodecBundle(nn.Module):
             self.models[key].mean.copy_(mean.float())
             self.models[key].std.copy_((squares[key] / count - mean.square()).clamp_min(0).sqrt().clamp_min(.05).float())
 
+    def _canonical_windows(self, dataset):
+        """One training frame once, in the same per-window frame the tokenizer sees."""
+        if dataset.split != "train":
+            raise ValueError("Normalization may only use training records")
+        for index in range(len(dataset)):
+            _, start, end = dataset.windows[index]
+            item = dataset[index]
+            n = end - start
+            human, obj, _ = to_canonical(item["human"][:n][None], item["object"][:n][None], self.config.dataset)
+            yield {"human": human, "object": obj, "valid_frames": torch.ones(1, n, dtype=torch.bool)}
+
+    def encode_view(self, view):
+        return {k: self.models[k].encode(view[k], view["valid_frames"]) for k in MODALITIES}
+
     @torch.no_grad()
     def encode(self, batch):
-        return {k: self.models[k].encode(batch[k], batch["valid_frames"]) for k in MODALITIES}
+        view, _ = self.canonical_view(batch)
+        return self.encode_view(view)
 
-    def loss(self, batch):
+    def loss(self, batch, geometry=None):
+        view, _ = self.canonical_view(batch)
         total, stats = 0, {}
         for key in MODALITIES:
-            value, detail = self.models[key].loss(batch[key], batch["valid_frames"])
+            gender = view["gender"] if key == "human" and "gender" in view else None
+            value, detail = self.models[key].loss(view[key], view["valid_frames"], gender=gender,
+                                                   geometry=geometry if key == "human" else None)
             total = total + value
             stats.update({key + "_" + k: float(v.detach()) for k, v in detail.items()})
         return total, stats

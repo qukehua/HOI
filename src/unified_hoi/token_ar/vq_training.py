@@ -13,23 +13,29 @@ from .codecs import CodecBundle, CodecConfig, codec_payload
 from .data import MotionDataset
 
 
-def _cpu_module_state(module, optimizer):
-    blob = {"model": {k: v.detach().cpu().clone() for k, v in module.state_dict().items()},
-            "optimizer": optimizer.state_dict()}
-    for state in blob["optimizer"]["state"].values():
+def _optimizer_to_device(optimizer, device):
+    for state in optimizer.state.values():
         for key, value in list(state.items()):
             if torch.is_tensor(value):
-                state[key] = value.detach().cpu().clone()
-    return blob
+                state[key] = value.to(device)
+
+
+def _cpu_module_state(module, optimizer):
+    # Copy into new dicts. state_dict() aliases the live optimizer state.
+    packed = optimizer.state_dict()
+    packed["state"] = {
+        key: {name: value.detach().cpu().clone() if torch.is_tensor(value) else value
+              for name, value in values.items()}
+        for key, values in packed["state"].items()
+    }
+    return {"model": {k: v.detach().cpu().clone() for k, v in module.state_dict().items()},
+            "optimizer": packed}
 
 
 def _restore_module_state(module, optimizer, blob, device):
     module.load_state_dict(blob["model"])
     optimizer.load_state_dict(blob["optimizer"])
-    for state in optimizer.state.values():
-        for key, value in list(state.items()):
-            if torch.is_tensor(value):
-                state[key] = value.to(device)
+    _optimizer_to_device(optimizer, device)
 
 
 def _selection_score(report):
@@ -91,6 +97,7 @@ def run_independent(config, resume=None):
         model.load_state_dict(saved["model"])
         for k, optimizer in optimizers.items():
             optimizer.load_state_dict(saved["optimizers"][k])
+            _optimizer_to_device(optimizer, device)
         step, epoch, skip = saved["step"], saved["epoch"], saved["next_batch"]
         updates = saved["modality_updates"]
         expected = {k: min(step, v) for k, v in budgets.items()}
@@ -116,6 +123,26 @@ def run_independent(config, resume=None):
     if contact_patience < 0:
         raise ValueError("contact_patience must be nonnegative")
     select_geometry = bool(config.get("select_by_geometry", False))
+    select_fid = bool(config.get("select_by_fid", False))
+    if select_geometry and select_fid:
+        raise ValueError("Use either geometry selection or FID selection")
+    fid_view = config.get("fid_view", "joint")
+    evaluator, fid_loader = None, None
+    if select_fid:
+        from .evaluate_motion_text import figure_table, reconstruct_batch, score_motion_pairs
+        from .motion_text import VIEWS, EvaluatorDataset, load_evaluator
+        if fid_view not in VIEWS:
+            raise ValueError(f"fid_view must be one of {VIEWS}")
+        if not config.get("motion_text_evaluator"):
+            raise ValueError("FID selection needs motion_text_evaluator")
+        fid_data = EvaluatorDataset(config["manifest"], "val", config["dataset"], support, config.get("window", 120))
+        if len(fid_data) < 2:
+            raise ValueError("FID selection needs at least two captioned validation windows")
+        evaluator, _ = load_evaluator(config["motion_text_evaluator"], config["dataset"], support,
+                                      fid_data.records, device)
+        fid_loader = DataLoader(fid_data, batch_sampler=[[i] for i in range(len(fid_data))],
+                                generator=torch.Generator().manual_seed(0))
+        metadata["selection"] = "lowest_validation_fid"
     if maximum <= step:
         raise ValueError("Requested run has no remaining updates")
     output.mkdir(parents=True, exist_ok=True)
@@ -186,7 +213,16 @@ def run_independent(config, resume=None):
                     score = report["loss"]
                     chosen = "last.pt"
                     selection_score = None
-                    if select_geometry:
+                    figure = None
+                    if select_fid:
+                        pairs = [reconstruct_batch(model, item, device) for item in fid_loader]
+                        figure = figure_table(score_motion_pairs(
+                            evaluator, pairs, device, seed=config.get("seed", 42)), fid_view)
+                        selection_score = figure["FID"]
+                        if selection_score < best_selection:
+                            best_selection = selection_score
+                            chosen = "best.pt"
+                    elif select_geometry:
                         selection_score = _selection_score(report)
                         if selection_score < best_selection:
                             best_selection = selection_score
@@ -197,18 +233,38 @@ def run_independent(config, resume=None):
                         contact_frozen=contact_frozen, best_contact_loss=best_contact,
                         contact_stalls=contact_stalls, best_selection=best_selection,
                         contact_snapshot=contact_snapshot, selection_score=selection_score,
-                        torch_rng=torch.get_rng_state(),
+                        figure_metrics=figure, torch_rng=torch.get_rng_state(),
                         cuda_rng=torch.cuda.get_rng_state_all() if device.type == "cuda" else []))
                     save_checkpoint(output / "last.pt", payload)
                     if chosen == "best.pt":
                         save_checkpoint(output / "best.pt", payload)
                     row = dict(step=step, modality_updates=updates, validation_loss=score, selection=chosen,
-                               contact_frozen=contact_frozen, human_joint_cm=report.get("human_joint_cm"),
-                               object_trans_cm=report.get("object_trans_cm"), object_rot_deg=report.get("object_rot_deg"),
-                               contact_f1=report.get("contact_f1"), contact_reconstruction=report.get("contact_reconstruction"),
-                               selection_score=selection_score, best_selection=best_selection)
+                               contact_frozen=contact_frozen, best_selection=best_selection)
+                    if figure is None:
+                        row.update(human_joint_cm=report.get("human_joint_cm"),
+                                   object_trans_cm=report.get("object_trans_cm"),
+                                   object_rot_deg=report.get("object_rot_deg"),
+                                   contact_f1=report.get("contact_f1"),
+                                   contact_reconstruction=report.get("contact_reconstruction"),
+                                   selection_score=selection_score)
+                    else:
+                        row.update(FID=figure["FID"], R_Precision=figure["R_Precision"],
+                                   Diversity=figure["Diversity"], Diversity_real=figure["Diversity_real"],
+                                   view=figure["view"],
+                                   views={name: {key: item[key] for key in
+                                                 ("FID", "R_Precision", "Diversity", "Diversity_real")}
+                                          for name, item in figure["views"].items()})
                     print(json.dumps(row), flush=True)
-                    log_swanlab(swan, {"val/" + k: v for k, v in row.items() if isinstance(v, (int, float))}, step)
+                    numeric = {"val/" + k: v for k, v in row.items() if isinstance(v, (int, float))}
+                    if figure is not None:
+                        for key, value in figure["R_Precision"].items():
+                            numeric["val/R_Precision_" + key] = value
+                        for name, item in figure["views"].items():
+                            numeric[f"val/{name}_FID"] = item["FID"]
+                            numeric[f"val/{name}_Diversity"] = item["Diversity"]
+                            for key, value in item["R_Precision"].items():
+                                numeric[f"val/{name}_R_Precision_{key}"] = value
+                    log_swanlab(swan, numeric, step)
                 if step >= maximum:
                     break
             epoch, skip = epoch + 1, 0

@@ -36,3 +36,6 @@ validate_every: 1000
 validation_batches: 8
 validation_text_condition: true
 log_every: 20
+selection_metric: fid
+fid_view: joint
+motion_text_evaluator: runs/token_ar/behave/motion_text_evaluator/last.pt

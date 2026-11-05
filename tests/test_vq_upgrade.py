@@ -15,6 +15,7 @@ from unified_hoi.token_ar.body import digest_file
 from unified_hoi.geometry import matrix_to_rotation6d, rotation6d_to_matrix
 from unified_hoi.token_ar.canonical import restore_scene, to_canonical
 from unified_hoi.token_ar.codecs import CodecBundle, CodecConfig, MotionVQVAE, codec_payload, load_codecs
+from unified_hoi.token_ar.vq_training import _cpu_module_state
 from unified_hoi.token_ar.embedding_metrics import embedding_scores, frechet_distance
 from unified_hoi.token_ar.evaluate_codecs import evaluate_codecs
 from unified_hoi.token_ar.motion_text import EvaluatorConfig, MotionTextEvaluator, load_evaluator
@@ -102,6 +103,15 @@ class TemporalEMATests(unittest.TestCase):
         loss_low, _ = codec.loss(human, values)
         loss_high, _ = other.loss(human, values)
         self.assertGreater(float(loss_high.detach()), float(loss_low.detach()))
+        optimizer = torch.optim.AdamW(codec.parameters(), lr=1e-3)
+        probe, _ = codec.loss(human, values)
+        probe.backward()
+        optimizer.step()
+        live = next(iter(optimizer.state.values()))["exp_avg"]
+        saved = next(iter(_cpu_module_state(codec, optimizer)["optimizer"]["state"].values()))["exp_avg"]
+        self.assertIsNot(live, saved)
+        live.add_(1)
+        self.assertFalse(torch.equal(live.cpu(), saved))
         contact = MotionVQVAE(4, config, contact=True)
         labels = torch.randint(0, 2, (2, 6, 4), dtype=torch.float32)
         _, contact_detail = contact.loss(labels, values)
@@ -123,6 +133,22 @@ class TemporalEMATests(unittest.TestCase):
 
 
 class EmbeddingTests(unittest.TestCase):
+    def test_figure_table_uses_fid_rprecision_and_diversity(self):
+        from unified_hoi.token_ar.evaluate_motion_text import figure_table
+        def row(fid, diversity):
+            return {"reconstructed": {"FID": fid, "Diversity": diversity,
+                                      "R_Precision": {"top1": .1, "top2": .2, "top3": .3}},
+                    "ground_truth": {"Diversity": 1.4}}
+        scores = {name: row(fid, 1.1 + fid) for name, fid in
+                  (("human", .4), ("object", .2), ("contact", .5), ("joint", .3))}
+        table = figure_table(scores, "joint")
+        self.assertEqual(table["view"], "joint")
+        self.assertEqual(table["FID"], .3)
+        self.assertEqual(set(table["R_Precision"]), {"top1", "top2", "top3"})
+        self.assertEqual(table["Diversity_real"], 1.4)
+        self.assertEqual(table["views"]["human"]["FID"], .4)
+        self.assertLess(table["FID"], table["views"]["contact"]["FID"])
+
     def test_fid_and_retrieval_controls(self):
         real = np.eye(8)
         self.assertLess(frechet_distance(real, real), 1e-7)

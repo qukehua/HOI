@@ -1,0 +1,44 @@
+architecture: token_ar_v1
+dataset: behave
+manifest: data/processed/behave_parametric.jsonl
+contact_support: data/parametric_assets/behave/contact_support.npz
+seed: 42
+cpu_threads: 4
+window: 120
+stride: 60
+output: runs/token_ar/behave/vq_canonical_100k_fid
+device: cuda:0
+batch_size: 128
+max_steps: 100000
+modality_steps:
+  human: 100000
+  object: 100000
+  contact: 100000
+motion_text_evaluator: runs/token_ar/behave/motion_text_evaluator/last.pt
+learning_rate: 0.0002
+validate_every: 1000
+validation_batches: 16
+log_every: 20
+select_by_geometry: false
+select_by_fid: true
+fid_view: joint
+contact_patience: 0
+use_swanlab: true
+swanlab_project: HOI
+swanlab_mode: online
+codec:
+  codebook_size: 512
+  latent_dim: 512
+  width: 512
+  network: residual
+  quantizer: ema
+  depth: 3
+  dilation_growth: 3
+  ema_decay: 0.99
+  ema_reset_threshold: 1.0
+  stride: 2
+  commitment_weight: 0.02
+  velocity_weight: 0.5
+  canonical_scene: true
+  joint_weight: 1.0
+  body_weight: 1.0

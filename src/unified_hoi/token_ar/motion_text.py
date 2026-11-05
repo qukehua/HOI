@@ -25,8 +25,8 @@ def caption_key(value):
 
 
 class EvaluatorDataset(MotionDataset):
-    def __init__(self, *args, **kwargs):
-        kwargs["include_geometry"] = False
+    def __init__(self, *args, include_geometry=False, **kwargs):
+        kwargs["include_geometry"] = include_geometry
         super().__init__(*args, **kwargs)
         # OMOMO has native sequences without captions. Keep them in VQ training,
         # but report and exclude them from this explicitly paired evaluation space.

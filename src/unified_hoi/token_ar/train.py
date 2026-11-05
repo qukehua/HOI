@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 import yaml
 
 from ..runtime import move_batch, write_json
-from . import ARCHITECTURE, MODES
+from . import ARCHITECTURE, MODALITIES, MODES
 from .body import digest_file
 from .checkpoint import read_metadata
 from .codecs import load_codecs
@@ -42,6 +42,29 @@ def validate(model, codecs, builder, dataset, config, accelerator):
         raise ValueError("Empty validation set")
     scores = {mode: loss / count for mode, (loss, count) in sums.items()}
     return sum(scores.values()) / len(scores), scores
+
+
+@torch.no_grad()
+def validate_figure(model, codecs, builder, dataset, evaluator, config, accelerator):
+    """Text-to-HOI generation scored with the same FID / R-precision / Diversity table as VQ."""
+    from .evaluate_motion_text import figure_table, score_motion_pairs
+    from .sample import complete
+    model.eval()
+    # Every rank walks the same windows, so FSDP layer all-gathers stay aligned.
+    loader = DataLoader(dataset, batch_sampler=[[i] for i in range(len(dataset))],
+                        generator=torch.Generator().manual_seed(0))
+    pairs = []
+    for index, batch in enumerate(loader):
+        batch = move_batch(batch, accelerator.device)
+        values, _ = complete(model, codecs, builder, batch, "111", seed=config.get("seed", 42) + index,
+                             temperature=0., top_k=0)
+        n = int(batch["valid_frames"].sum())
+        predicted = {k: values[k][None] for k in MODALITIES}
+        predicted.update(valid_frames=torch.ones(1, n, dtype=torch.bool, device=accelerator.device), fps=batch["fps"])
+        pairs.append((batch, predicted))
+    figure = figure_table(score_motion_pairs(evaluator, pairs, accelerator.device, seed=config.get("seed", 42)),
+                          config.get("fid_view", "joint"))
+    return figure["FID"], figure
 
 
 def run(config, resume=None):
@@ -76,6 +99,20 @@ def run(config, resume=None):
     val = MotionDataset(split="val", **kwargs)
     if not len(train) or not len(val):
         raise ValueError("Need nonempty train and validation splits")
+    fid_selection = config.get("selection_metric", "token_ce") == "fid"
+    fid_data, evaluator = None, None
+    if fid_selection:
+        from .motion_text import VIEWS, EvaluatorDataset, load_evaluator
+        if config.get("fid_view", "joint") not in VIEWS:
+            raise ValueError(f"fid_view must be one of {VIEWS}")
+        if not config.get("motion_text_evaluator"):
+            raise ValueError("FID selection needs motion_text_evaluator")
+        fid_data = EvaluatorDataset(config["manifest"], "val", config["dataset"], support_hash,
+                                    config.get("window", 120), include_geometry=True)
+        if len(fid_data) < 2:
+            raise ValueError("FID selection needs at least two captioned validation windows")
+        evaluator, _ = load_evaluator(config["motion_text_evaluator"], config["dataset"], support_hash,
+                                      fid_data.records, accelerator.device)
     old = read_metadata(resume) if resume else None
     if old:
         from transformers import AutoTokenizer
@@ -92,7 +129,9 @@ def run(config, resume=None):
                 "manifest_sha256": manifest_hash, "backbone_config": model.backbone.config.to_dict(),
                 "parameters": sum(p.numel() for p in model.parameters()),
                 "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
-                "selection_metric": "mean_of_seven_teacher_forced_validation_token_cross_entropies",
+                "selection_metric": ("lowest_validation_fid_rprecision_diversity"
+                                    if fid_selection else
+                                    "mean_of_seven_teacher_forced_validation_token_cross_entropies"),
                 "num_processes": accelerator.num_processes}
     if old:
         for key in ("codec_sha256", "manifest_sha256", "support_sha256", "num_processes"):
@@ -149,7 +188,10 @@ def run(config, resume=None):
                 logged_loss = accelerator.reduce(result["loss_sum"].detach(), reduction="sum") / global_count
                 accelerator.print(json.dumps({"step": step, "token_ce": float(logged_loss)}), flush=True)
             if step % config.get("validate_every", 1000) == 0 or step == config["max_steps"]:
-                score, details = validate(model, codecs, builder, val, config, accelerator)
+                if fid_selection:
+                    score, details = validate_figure(model, codecs, builder, fid_data, evaluator, config, accelerator)
+                else:
+                    score, details = validate(model, codecs, builder, val, config, accelerator)
                 improved = score < best
                 best = min(best, score)
                 destination = output / f"checkpoint-{step:07d}"
@@ -169,7 +211,17 @@ def run(config, resume=None):
                     if improved:
                         write_json(output / "best.json", {"checkpoint": destination.name, "step": step, "score": score})
                 accelerator.wait_for_everyone()
-                accelerator.print(json.dumps({"step": step, "val_token_ce": score, "modes": details}), flush=True)
+                if fid_selection:
+                    accelerator.print(json.dumps({"step": step, "FID": details["FID"],
+                                                  "R_Precision": details["R_Precision"],
+                                                  "Diversity": details["Diversity"],
+                                                  "Diversity_real": details["Diversity_real"],
+                                                  "view": details["view"],
+                                                  "views": {name: {key: item[key] for key in
+                                                                   ("FID", "R_Precision", "Diversity", "Diversity_real")}
+                                                            for name, item in details["views"].items()}}), flush=True)
+                else:
+                    accelerator.print(json.dumps({"step": step, "val_token_ce": score, "modes": details}), flush=True)
             if step >= config["max_steps"]:
                 break
         epoch, skip = epoch + 1, 0

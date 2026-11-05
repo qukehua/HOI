@@ -13,6 +13,61 @@ from .evaluation_protocol import fingerprint
 from .motion_text import EvaluatorDataset, VIEWS, load_evaluator
 
 
+def figure_metrics(scores, view):
+    """One row of the MotionGPT table: FID, R-precision Top-1/2/3, Diversity."""
+    if view not in VIEWS:
+        raise ValueError(f"FID view must be one of {VIEWS}")
+    row = scores[view]["reconstructed"]
+    return {"view": view, "FID": row["FID"],
+            "R_Precision": {k: row["R_Precision"][k] for k in ("top1", "top2", "top3")},
+            "Diversity": row["Diversity"],
+            "Diversity_real": scores[view]["ground_truth"]["Diversity"]}
+
+
+def figure_table(scores, view="joint"):
+    table = {name: figure_metrics(scores, name) for name in VIEWS}
+    chosen = dict(table[view])
+    chosen["views"] = table
+    return chosen
+
+
+@torch.no_grad()
+def reconstruct_batch(codecs, batch, device):
+    batch = move_batch(batch, device)
+    n = int(batch["valid_frames"].sum())
+    canonical, anchor = codecs.canonical_view(batch)
+    tokens = codecs.encode_view(canonical)
+    values = {k: codecs.models[k].decode(tokens[k][0], n) for k in MODALITIES}
+    if anchor is None:
+        values["human"], values["object"] = canonicalize(values["human"], values["object"], codecs.config.dataset)
+    else:
+        values["human"], values["object"] = codecs.restore(values["human"], values["object"], anchor)
+    reconstructed = {k: values[k][None] for k in MODALITIES}
+    reconstructed.update(valid_frames=torch.ones(1, n, dtype=torch.bool, device=device), fps=batch["fps"])
+    return batch, reconstructed
+
+
+@torch.no_grad()
+def score_motion_pairs(evaluator, pairs, device, *, seed=42, candidates=32, repeats=20, diversity_pairs=300):
+    gt, pred = {v: [] for v in VIEWS}, {v: [] for v in VIEWS}
+    texts, sources, captions = [], [], []
+    for ground, predicted in pairs:
+        ground = move_batch(ground, device)
+        predicted = move_batch(predicted, device)
+        for view in VIEWS:
+            gt[view].append(evaluator.encode_motion(ground, view).cpu())
+            pred[view].append(evaluator.encode_motion(predicted, view).cpu())
+        texts.append(evaluator.encode_text(ground["text_embedding"]).cpu())
+        sources.extend(ground["source_id"])
+        captions.extend(ground["caption_key"])
+    if len(texts) < 2:
+        raise ValueError("FID requires at least two windows")
+    text = torch.cat(texts).numpy()
+    return {view: embedding_scores(torch.cat(gt[view]).numpy(), torch.cat(pred[view]).numpy(), text,
+                                   source_ids=sources, captions=captions, seed=seed, candidates=candidates,
+                                   repeats=repeats, pairs=diversity_pairs) for view in VIEWS}
+
+
 @torch.no_grad()
 def evaluate_motion_text(codecs, saved, checkpoint, output, *, evaluator, manifest, contact_support,
                          split="val", window=120, limit=None, device="cpu", seed=42,
@@ -28,36 +83,17 @@ def evaluate_motion_text(codecs, saved, checkpoint, output, *, evaluator, manife
     if total < 2:
         raise ValueError("Motion-text evaluation requires at least two windows")
     evaluator_model, evaluator_saved = load_evaluator(evaluator, codecs.config.dataset, support, dataset.records, device)
-    gt, pred = {v: [] for v in VIEWS}, {v: [] for v in VIEWS}
-    texts, sources, captions, windows = [], [], [], []
+    pairs, windows = [], []
     loader = DataLoader(dataset, batch_sampler=[[i] for i in range(total)],
                         generator=torch.Generator().manual_seed(0))
     for index, batch in enumerate(loader):
-        batch = move_batch(batch, device)
-        n = int(batch["valid_frames"].sum())
-        view, anchor = codecs.canonical_view(batch)
-        tokens = codecs.encode_view(view)
-        values = {k: codecs.models[k].decode(tokens[k][0], n) for k in MODALITIES}
-        if anchor is None:
-            values["human"], values["object"] = canonicalize(values["human"], values["object"], codecs.config.dataset)
-        else:
-            values["human"], values["object"] = codecs.restore(values["human"], values["object"], anchor)
-        reconstructed = {k: v[None] for k, v in values.items()}
-        reconstructed.update(valid_frames=torch.ones(1, n, dtype=torch.bool, device=device), fps=batch["fps"])
-        for view in VIEWS:
-            gt[view].append(evaluator_model.encode_motion(batch, view).cpu())
-            pred[view].append(evaluator_model.encode_motion(reconstructed, view).cpu())
-        texts.append(evaluator_model.encode_text(batch["text_embedding"]).cpu())
-        sources.extend(batch["source_id"])
-        captions.extend(batch["caption_key"])
+        pairs.append(reconstruct_batch(codecs, batch, device))
         record, start, end = dataset.windows[index]
         windows.append([dataset.records[record]["sequence_id"], start, end])
         if (index + 1) % 10 == 0 or index + 1 == total:
             print(f"Motion-text VQ evaluation {index + 1}/{total}", flush=True)
-    text = torch.cat(texts).numpy()
-    scores = {v: embedding_scores(torch.cat(gt[v]).numpy(), torch.cat(pred[v]).numpy(), text,
-                                  source_ids=sources, captions=captions, seed=seed,
-                                  candidates=candidates, repeats=repeats, pairs=diversity_pairs) for v in VIEWS}
+    scores = score_motion_pairs(evaluator_model, pairs, device, seed=seed, candidates=candidates,
+                                repeats=repeats, diversity_pairs=diversity_pairs)
     summary = dict(kind="vq_motion_text_reconstruction", dataset=codecs.config.dataset, split=split,
                    checkpoint=str(checkpoint), checkpoint_sha256=digest_file(checkpoint),
                    checkpoint_step=saved.get("step"), modality_updates=saved.get("modality_updates"),

@@ -11463,68 +11463,7 @@ _**User**_
 
 _**Agent (grok-4.7)**_
 
-<think><details><summary>Thought Process</summary>
-The user wants me to:
-
-1. Pause the current VQ training
-
-2. 将 BEHAVE 数据集上主模型与 VAE 训练的指标对齐图中标准：FID 降低、R-precision 提升（Top-1/2/3）、Diversity 调整。
-
-VAE 将重新训练 10 万步，best.pt 按 FID 最优选取，与 T2M-GPT / MotionGPT 保持一致。
-
-需要把 VQ 和主 AR 模型的验证指标从几何选择分数（joint cm + object trans + rotation + contact F1）统一改为图中标准：FID、R-precision（Top-1/2/3）、Diversity。
-
-正在查看代码中 VQ 与主 AR 训练的指标计算位置。现有 motion-text 评估器已包含 FID、R-precision 和 Diversity，可直接用于训练循环。VAE 的 best checkpoint 将按最低 FID 选取。全量 FID 计算成本较高，需结合现有验证频率（每 1000 步）进行权衡。
-
-全量 motion-text 评估约 17 秒，每 1000 步验证可接受。
-
-多模态 VQ（human / object / contact / joint）的 best checkpoint 按 FID 选取时，需确定使用哪个模态的 FID。human FID 最接近 T2M-GPT 的单运动 FID，可能是最佳选择。
-
-正在对比 human、object、contact、joint 四个模态的 FID 平均值与联合嵌入方案，以确定 best checkpoint 的选取标准。
-
-明确用户意图：暂停当前训练后，仅对 VAE 重新训练 10 万步，同时将主模型 AR 训练路径的验证指标也统一为图中标准。接下来需要深入查看代码库中主模型与 VAE 的指标计算逻辑。
-
-明确仅修改指标度量与 best.pt 选取逻辑，不回退 canonicalization 或 body weight 等训练配方。将 contact_patience 和几何选择替换为 FID 选择，以匹配图中标准指标。
-
-正在查看 train.py、evaluate、metrics 和 vq validation 的代码，以确定训练与验证阶段的指标计算逻辑。
-
-MotionGPT 与 T2M-GPT 均采用 VQ-VAE + GPT 架构，best checkpoint 均按 FID 最优选取。用户要求与 MotionGPT 一致，核心即 best.pt 按最低 FID 挑选。
-
-正在确认评估器是否支持按模态计算 FID，以避免 VQ 验证阶段出现性能瓶颈。当前 10 万步训练尚未结束，需先暂停并新建输出目录，防止与几何选择方案的旧结果混淆。确认仅修改指标定义与 best.pt 选取逻辑，不回退 body_weight、canonical_scene 等训练配方。
-
-决定保留 canonical 训练配方与 body weight，不回退。contact early stop 基于 contact BCE，与 FID 无关，但用户未提及是否保留，因此将其视为需替换的旧机制。明确仅修改指标定义与 best.pt 选取逻辑，不回退训练配方。
-
-正在查看 AR 训练验证代码，以及 metrics.py、evaluate.py、train.py 和 benchmark 等入口文件，以全面理解当前指标的采集与展示方式。同时确认 VQ 验证阶段每 1000 步计算 FID 的性能开销在可接受范围内。
-
-正在查看 evaluate_motion_text 的结构，以明确“joint”指标的具体定义。针对多模态 VQ 的 best checkpoint 选取，正在权衡 human FID 与四模态平均 FID 的取舍：human FID 最接近 T2M-GPT 的单运动 FID，但会忽略 object、contact 等模态；平均 FID 虽能兼顾 HOI 全部模态，却略显人为设计。用户要求“fid最好”，因此需要在 T2M-GPT 风格与 HOI 多模态完整性之间做出取舍。
-
-正在确认项目中指标的命名规范与 AR 模型的验证逻辑。计划先暂停训练，再读取 train.py、vq_training.py、evaluate_motion_text.py 和 metrics 文件，随后实现基于 FID、R-precision、Diversity 的验证流程，并按最低 FID 保存 best checkpoint。
-
-主模型训练循环的验证日志与 checkpoint 选取逻辑也将同步应用新指标。准备新建 10 万步配置与输出目录并启动 VAE 训练。明确用户要求的是修改指标定义，而非立即启动 AR 训练，因此需先查看代码。
-</details></think>
-
-_**Agent (grok-4.7)**_
-
 先停掉正在跑的 VAE。接着把 BEHAVE 上主模型和 VAE 的验证指标改成图里的 FID、R-Precision 和 Diversity，再用验证集 FID 最好的权重作为 `best.pt`，重新训 10 万步。
-
-_**Agent (grok-4.7)**_
-
-<tool-use data-tool-type="shell" data-tool-name="run_terminal_command_v2"><details>
-<summary>Tool use: **run_terminal_command_v2** • Run command: pgrep -af &#34;train_codecs&#34; || echo &#34;no train_codecs&#34;; nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv</summary>
-```bash
-pgrep -af "train_codecs" || echo "no train_codecs"; nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv
-```
-
-```
-255931 .venv/bin/python -u -B -m unified_hoi.token_ar.train_codecs --config configs/token_ar/vq_behave_canonical_100k.yaml --resume runs/token_ar/behave/vq_canonical_100k/last.pt
-index, memory.used [MiB], utilization.gpu [%]
-0, 2238 MiB, 12 %
-1, 4 MiB, 0 %
-2, 4 MiB, 0 %
-3, 2558 MiB, 16 %
-
-```
-</details></tool-use>
 
 _**Agent (grok-4.7)**_
 
@@ -11590,11 +11529,22 @@ Status: **completed**
 
 _**Agent (grok-4.7)**_
 
-<think><details><summary>Thought Process</summary>
-I need to understand train.py validation metrics and evaluate_motion_text so I can reuse FID computation during VQ training.
+<tool-use data-tool-type="shell" data-tool-name="run_terminal_command_v2"><details>
+<summary>Tool use: **run_terminal_command_v2** • Run command: pgrep -af &#34;train_codecs&#34; || echo &#34;no train_codecs&#34;; nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv</summary>
+```bash
+pgrep -af "train_codecs" || echo "no train_codecs"; nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv
+```
 
-"主模型训练"指 train.py 中的 AR 模型。
-</details></think>
+```
+255931 .venv/bin/python -u -B -m unified_hoi.token_ar.train_codecs --config configs/token_ar/vq_behave_canonical_100k.yaml --resume runs/token_ar/behave/vq_canonical_100k/last.pt
+index, memory.used [MiB], utilization.gpu [%]
+0, 2238 MiB, 12 %
+1, 4 MiB, 0 %
+2, 4 MiB, 0 %
+3, 2558 MiB, 16 %
+
+```
+</details></tool-use>
 
 _**Agent (grok-4.7)**_
 
@@ -11616,47 +11566,6 @@ _**Agent (grok-4.7)**_
 <summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/embedding_metrics.py</summary>
 
 </details></tool-use>
-
-_**Agent (grok-4.7)**_
-
-<think><details><summary>Thought Process</summary>
-The user wants:
-1. Pause current training
-
-2. 将主模型与VAE训练的BEHAVE指标统一为图中所示：FID、R-precision Top-1/2/3、Diversity。
-
-3. VAE需重新训练10万步，best.pt按FID最优选取，与MotionGPT一致。
-
-现有验证逻辑使用复合评分，需改为FID评估。已有的evaluate_motion_text可直接计算所需指标，但每1000步完整评估约需17秒。
-
-每1000步评估约17秒，占训练时间不到2%，可接受。
-
-但HOI数据包含human、object、contact、joint四个运动模态，而图中指标为单一值。需确定best.pt应按哪个模态的FID选取，或是否采用多模态综合指标。
-
-指标日志将完全替换为FID、R-precision Top1/2/3、Diversity，不再使用几何损失或复合评分。
-
-best.pt的选取标准已明确：采用joint embedding FID（综合human、object、contact三路重建流），与T2M-GPT一致。
-
-主模型训练的验证逻辑也需调整。当前AR trainer按teacher-forced token cross-entropy均值选取最优checkpoint，但该指标无法直接反映生成质量。改为FID、R-precision、Diversity后，必须先让验证流程能够生成运动序列，而非仅计算token损失。
-
-计算FID需要先生成运动序列，再用评估器编码，过程较慢。主模型验证需改为生成评估，因此需要查看evaluate.py和sample.py中现有的生成评估路径。
-
-主模型验证若每步都完整生成运动序列，Qwen 4B的开销可能过高。当前仅重训VAE，因此需谨慎修改AR代码，避免破坏现有训练路径或让验证流程过重。接下来将查看evaluate.py和benchmark的具体实现。
-
-现有测试会因指标变更而失效。独立训练器的测试断言best.pt不存在，若改为按FID保存checkpoint，该断言将失败。短时测试运行FID评估也会变慢并改变预期结果。
-
-考虑通过配置开关控制FID选取，但用户要求默认验证即输出这些指标，不能仅依赖可选参数。现有测试未开启该开关，因此best.pt仍不存在；但若默认验证强制计算FID，短时训练也会触发评估器调用。需要重新检查测试代码的具体实现。
-
-现有测试使用的是临时微调的tiny evaluator，而非真实评估器。训练循环本身不会调用评估器，只有evaluate_codecs在训练结束后执行指标计算。
-
-若将FID评估无条件嵌入VQ验证流程，短时测试（3步、validate_every=1）会在2个窗口上重复运行3次FID计算。测试数据集被截断至8帧且仅含4个窗口，可能触发嵌入值非有限或窗口数不足等异常。
-
-决定将FID评估作为默认行为嵌入VQ验证流程。当配置中存在motion_text_evaluator时，验证阶段自动计算图中指标并按重建FID选取最优checkpoint。现有测试因包含该评估器路径，会触发best.pt的生成，导致其断言失效。需要同步更新该测试以匹配新的默认行为。
-
-正在检查测试中的 tiny evaluator 是否能被 VQ 验证流程正确加载。短时训练得到的微调评估器可能与真实评估器不兼容，且截断数据集在 FID 计算中存在隐患。需要先确认 load_evaluator 和 EvaluatorDataset 的兼容性。
-
-决定将FID评估与checkpoint选取通过配置开关`select_by_fid`控制，新YAML启用该选项。VAE和主模型的Behave训练配置需同步更新指标记录方式。主模型训练涉及qwen35_4b_behave.yaml等文件，需在train.py中按配置请求计算FID。AR生成评估开销较大，接下来查看evaluate.py。
-</details></think>
 
 _**Agent (grok-4.7)**_
 
@@ -11736,21 +11645,10 @@ Directory: **`/share/personal/qukehua/HOI`** (8 files)
 
 _**Agent (grok-4.7)**_
 
-<think><details><summary>Thought Process</summary>
-The user wants metrics for both main model (AR) training and VAE training to be FID, R-precision Top1/2/3, and Diversity, matching the table header.
+<tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
+<summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/configs/token_ar/qwen35_4b_behave.yaml</summary>
 
-VAE 将重新训练 10 万步，bestpt 由 FID 最优结果选出，与 MotionGPT 保持一致。
-
-主模型验证将从 token CE 改为完整序列生成 FID，与 VAE 保持一致。VQ 验证也会同步计算并记录 FID、R-precision top1/2/3、Diversity，best.pt 按最低 FID 选出。
-
-VAE 的 FID 应用于重建评估，主模型的 FID 应用于生成评估。正在查看 sample.py 和 evaluate.py 是否已有现成的生成评估函数，以避免在 train.py 中重复实现。
-
-若主模型生成评估实现过于复杂，将优先完成 VQ 训练指标与 best.pt 选择逻辑。同时会检查 evaluate.py 和 sample.py 的代码复杂度，并补充 train.py 选择字符串的测试。
-
-主模型生成 FID 需要先生成 token 再解码为动作序列，实现较复杂。若训练中直接接入生成评估，可能耗时数小时。准备先快速查看 evaluate.py 和 sample.py 的代码结构，以判断能否复用现有函数。
-
-重新理解用户意图：指标统一是评估标准，不意味着主模型训练循环必须每步生成。当前优先完成 VAE 重训，指标变更将同步应用到两个流水线的评估与 best.pt 选择逻辑。准备查看 evaluate.py 中主模型的现有指标定义。
-</details></think>
+</details></tool-use>
 
 _**Agent (grok-4.7)**_
 
@@ -11792,35 +11690,6 @@ Status: **completed**
 _**Agent (grok-4.7)**_
 
 <tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
-<summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/configs/token_ar/qwen35_4b_behave.yaml</summary>
-
-</details></tool-use>
-
-_**Agent (grok-4.7)**_
-
-<think><details><summary>Thought Process</summary>
-Let me read evaluate.py to see what it currently reports.
-
-训练与评估指标应统一为 FID、R-precision 和 Diversity。
-
-VAE 验证将基于重建 embedding_scores 进行。FID 采用 joint 视图指标，因为图中仅有一行指标。同时会记录 human、object、contact、joint 的指标以填满表格。
-
-bestpt 将按 joint 重建 FID 严格选取，低者优先；若平局则保留首个。接下来会终止当前训练进程。
-
-计划将评估中的 embedding 计算提取为 `score_reconstruction` 函数，供训练与评估共用以避免重复。VQ 训练时会加载 evaluator 并按 joint FID 选取最优 checkpoint。
-
-验证时将计算并记录各视图的 FID、R-precision top1/2/3 与 Diversity。joint FID 改为严格递减选取 best.pt，不再依赖几何选择。
-
-contact early-stop 将关闭（patience 设为 0），避免冻结导致指标失真，确保 10 万步训练完全反映模型真实性能。
-
-新配置将基于 vq_behave_canonical_100k.yaml，输出目录改为 vq_canonical_100k_fid。select_by_fid 设为 true，select_by_geometry 设为 false。主模型训练脚本的验证逻辑是否需同步改为计算生成 FID，仍在考虑。
-
-正在权衡主模型训练循环是否需要改为完整生成评估。若改动过大且涉及 FSDP 多卡，将改为单进程生成并调用共享指标函数，同时更新选择指标名称。
-</details></think>
-
-_**Agent (grok-4.7)**_
-
-<tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
 <summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/evaluate.py</summary>
 
 </details></tool-use>
@@ -11856,20 +11725,6 @@ Additional data:
 Status: **completed**
 
 </details></tool-use>
-
-_**Agent (grok-4.7)**_
-
-<think><details><summary>Thought Process</summary>
-The main model evaluation currently is geometry (MPJPE etc.) per prediction file.
-
-VQ重建的motion-text FID位于evaluate_codecs / evaluate_motion_text中。
-
-VAE训练将接入重建FID指标。主模型验证需改为生成采样并计算FID、R-precision和Diversity，这需要修改train.py中的采样逻辑。正在查看sample.py以寻找批量生成函数。
-
-VAE验证将改用嵌入指标，以FID为最优标准。主模型验证拟在训练中调用现有生成代码计算FID，若直接集成风险过高则调整元数据配置。用户要求暂停当前训练并重新训练VAE。
-
-主模型的FID验证逻辑必须真实落地，确保后续AR训练按FID筛选最优模型。接下来将快速查看sample.py和benchmark.py。
-</details></think>
 
 _**Agent (grok-4.7)**_
 
@@ -11919,14 +11774,6 @@ Status: **completed**
 
 _**Agent (grok-4.7)**_
 
-<think><details><summary>Thought Process</summary>
-Let me read benchmark.py around metrics to see what the main model benchmark reports.
-
-指标需与图中一致，包括 FID、R-precision 和 Diversity。
-</details></think>
-
-_**Agent (grok-4.7)**_
-
 <tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
 <summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/benchmark.py</summary>
 
@@ -11934,25 +11781,10 @@ _**Agent (grok-4.7)**_
 
 _**Agent (grok-4.7)**_
 
-<think><details><summary>Thought Process</summary>
-The user wants the metrics shown in the figure (FID, R-precision Top1/2/3, Diversity) to replace the current metric set for both:
+<tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
+<summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/sample.py</summary>
 
-主模型训练（AR）目前使用 token CE 作为选择指标，基准测试则采用 1-NNA/COV/MMD 及几何指标。
-
-VAE 训练目前使用几何综合得分。用户要求暂停训练，将 VAE 重新训练 10 万步，并以 FID 最优结果作为 best.pt。"所有指标" 可能涵盖基准测试的 1-NNA 等几何评估，也可能仅指图中 T2M-GPT 表头的 FID、R-precision、Diversity。
-
-主模型训练若在每 1000 步调用 4B 模型生成并计算 FID，开销极大，可能耗时数小时。因此考虑提取 VQ 训练中已有的 `motion_text_scores` 作为通用评估函数，供 AR 验证复用，避免重复实现生成逻辑。
-
-正在 train.py 中为 AR 添加验证路径，通过 `complete` 生成验证集序列并用统一评估器计算 FID 等指标。需要确认 `complete` 在训练循环中的调用方式及耦合程度。
-
-`complete` 的调用模式为 "111"，用于生成全部动作序列并计算 FID。但 FSDP 下模型被 accelerator 包装，可能需要解包后调用。若仅在主进程计算 FID，其他进程不参与会破坏 FSDP 的同步对齐。
-
-若仅在主进程执行生成计算，FSDP 的分布式收集操作将无法同步对齐。AR 训练可能涉及多卡配置，因此验证路径必须让所有 rank 均参与生成，而非单进程完成。
-
-已确认所有 rank 必须同步执行模型前向传播以维持 FSDP 对齐。因此计划在所有 rank 上并行生成验证序列，仅由主进程计算 FID 并保存最优结果，避免跨进程同步问题。这会带来重复计算开销，但能确保训练稳定。接下来需要检查 `complete()` 在 FSDP 包装下的兼容性。
-
-正在权衡更轻量的实现方案：仅修改 VQ 验证指标与选择逻辑并重新训练，同时将主模型的 selection_metric 改为图中生成指标。但图中 FID、R-precision 等属于生成评估，不能直接用 teacher-forced
-</details></think>
+</details></tool-use>
 
 _**Agent (grok-4.7)**_
 
@@ -11990,39 +11822,6 @@ Additional data:
 Status: **completed**
 
 </details></tool-use>
-
-_**Agent (grok-4.7)**_
-
-<tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
-<summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/sample.py</summary>
-
-</details></tool-use>
-
-_**Agent (grok-4.7)**_
-
-<think><details><summary>Thought Process</summary>
-I'll implement a focused solution:
-
-先暂停训练。再添加一个可复用函数，用于直接计算VQ重建的FID、R-precision和Diversity，无需写入文件。
-
-该函数将用于VQ验证。best.pt按重建FID最低选取，采用joint视图并分别记录human、object、contact、joint指标。主模型与VAE训练的指标均需与图中对齐。
-
-主模型训练的验证逻辑也将同步调整。不再以token CE为指标，改为生成FID来评估效果。需要确保所有rank执行相同的生成循环，保证FSDP对齐。
-
-主模型验证将针对模式111（text-to-HOI）的生成动作计算embedding指标。所有rank使用相同随机种子与窗口，确保FSDP下各rank生成结果一致、FID可直接比较。但FSDP模型上调用generate_codes是否可行仍不确定。
-
-主模型验证将保持现有训练循环结构不变，仅把验证评分替换为新的 `generation_embedding_metrics` 调用。这样可以避免在生成能力尚未就绪时破坏现有的 teacher-forced 训练路径。
-
-若FSDP下调用generate_codes过于侵入，将优先确保VQ正确实现，并把指标计算函数同时用于VAE与主模型。
-
-主模型验证需新增motion_text_evaluator路径。现有AR配置缺少该字段，将补充到qwen35_4b_behave.yaml及其他Behave AR配置中。
-
-主模型验证若启用生成FID，单次需98个窗口、约60个token的自回归生成，开销极大。直接修改验证逻辑存在FSDP死锁风险，可能破坏后续AR训练。当前优先完成VAE重训。
-
-主模型验证将改为仅在配置中显式开启 `selection_metric: fid` 时才执行生成FID评估，Behave AR配置默认启用该选项。需要先确认 `generate_codes` 的接口签名，确保FSDP下调用安全。
-
-若FSDP下调用generate_codes过于复杂，将直接实现VQ验证，并为AR新增一个基于complete()与evaluator的验证函数，确保所有rank执行一致。Behave配置会显式包含evaluator字段，避免旧版配置回退到旧指标导致意外崩溃。
-</details></think>
 
 _**Agent (grok-4.7)**_
 
@@ -12064,60 +11863,6 @@ Status: **completed**
 
 _**Agent (grok-4.7)**_
 
-<think><details><summary>Thought Process</summary>
-AR generation validation with FSDP is risky (backbone forward with past_key_values under FSDP).
-
-将按图中指标重新计算验证集上的AR训练指标，但需谨慎处理。
-
-将使用 evaluator 为 text-to-full-HOI 任务计算 AR 验证 FID，并按该指标选择最优 checkpoint。所有 rank 运行相同循环以保证 FSDP 集合正确。"主模型训练"指标指 train.py 中的验证逻辑。
-
-将实现 `figure_metrics` 函数，返回 FID、R-precision tops 与 Diversity。
-
-VQ 使用重建嵌入，AR 使用 mode 111 的生成嵌入。选择最优 checkpoint 时以最低 FID 为准。日志格式包含 FID、R_Precision、Diversity 及 Diversity_GT。4 视图的 VQ 结果会按视图分别记录，但最终以单行形式呈现。
-
-将 joint 视图作为主选指标行，其余视图同步记录以匹配表格。打印的选指标准行与图中完全一致。
-
-Diversity 取值越接近真实数据越好，但仅按 FID 选择最优 checkpoint，仍会记录 diversity 和 R-precision。
-
-复用 embedding_scores 中已有的 score_motions 函数实现打分，无需重写文件。
-
-将在 evaluate_motion_text.py 中新增 `reconstruction_figure` 函数，用于返回重建指标字典。
-
-VQ 训练将加载 evaluator 与验证数据集一次，在每次验证时调用该函数。以 joint 视图重建 FID 最低为最优标准，保存 best.pt 并记录 figure 指标。本次运行不启用几何选择，保持 contact_patience 为 0。
-
-将在 run_independent 中按需构建 EvaluatorDataset 以支持 FID 选择。验证开销可控，约每 1000 步 17 秒。输出目录定为 runs/token_ar/behave/vq_canonical_100k_fid。保留当前改进的表示配方，仅调整指标计算与重训逻辑。
-
-保留 canonical 表示，避免因回退旧绝对姿态而使 FID 变差。
-
-AR 训练的 train.py 将增加可选的 fid 验证逻辑。Behave 的 yaml 配置会新增 `selection_metric: fid` 与 `motion_text_evaluator` 路径。仅当 yaml 中包含这些键时才启用生成 FID 验证；否则默认行为保持不变，确保测试兼容。
-
-新增配置键会改变语义，导致旧 AR checkpoint 无法恢复，但这是预期行为。正在编写 `validate_figure` 函数，使用 EvaluatorDataset 在生成模式下计算验证指标。
-
-正在实现 `validate_figure` 的具体逻辑：使用逐样本 DataLoader 遍历验证集，对每个样本以 mode 111 完成文本到完整 HOI 的生成，再将生成结果与真实数据按视图分别收集，为后续计算 FID 和 R-precision 做准备。
-
-验证函数将返回 joint 视图重建 FID 与 figure 指标行。所有 rank 在 temperature 0、相同 seed 下生成结果一致，因此可直接聚合计算指标。
-
-FSDP 包装器会自动转发模型方法调用，complete() 中的 generate_codes 能正常执行。
-
-FSDP 包装器会自动转发 generate_codes 调用。各 rank 在相同窗口索引下按顺序生成，序列长度一致，因此 FSDP 的 collectives 能正确匹配。
-
-将验证集 shuffle 设为 False，确保各 rank 生成相同窗口数据以保持 FSDP 对齐。temperature 0 使生成完全确定，argmax 策略下所有 rank 结果一致。
-
-为保证指标稳定，AR 验证不再仅取 validation_batches=8 个样本，而是遍历全部验证窗口计算 FID。每 1000 步 98 次生成约需 17 秒，速度可接受。
-
-若配置中未启用 fid 选择，则保留原有验证逻辑，避免破坏现有行为。
-
-qwen3_4b 与 qwen3_8b 的 behave 配置也将同步改为 fid 指标，确保主模型训练指标一致。Refiner 不在本次调整范围内。VQ 日志将按图中格式输出 FID、R_Precision、Diversity 及选中 checkpoint。
-
-正在确定最优 checkpoint 的选择标准。考虑过按 human FID 选择，但图中未指定模态，joint 视图重建 FID 更能反映整体模型表现。也在权衡是否采用四个视图的平均 FID。
-
-最终确定以 joint 视图重建 FID 作为唯一选优标准，与 MotionGPT 的单指标逻辑保持一致。
-
-将在 evaluate_motion_text.py 中新增 `reconstruction_embeddings` 函数，用于提取全部验证窗口的重建嵌入并计算分数。VQ 训练时 evaluator checkpoint（约 106MB）将加载至 GPU 0，与 VQ 模型共享显存。
-</details></think>
-
-_**Agent (grok-4.7)**_
-
 <tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
 <summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/motion_text.py</summary>
 
@@ -12139,30 +11884,6 @@ _**Agent (grok-4.7)**_
 
 _**Agent (grok-4.7)**_
 
-<think><details><summary>Thought Process</summary>
-I'll implement VQ FID selection thoroughly and AR training validation to use the same figure metrics on generated motions.
-
-每1000步对所有验证窗口生成动作在4B模型上开销过高。
-
-确认验证窗口采用全集而非子集，以匹配图中指标。FSDP下需在所有rank上同步运行验证生成。正在查看train.py的run()函数，确定评估器接入位置及模型使用方式，并检查complete()在accelerator准备前的原始模型上是否可用。
-
-验证时使用已准备的模型，generate_codes调用self.backbone；FSDP包裹下只要所有rank参与forward即可正常运行。
-
-计划补充单元测试：用随机嵌入验证指标键值提取与FID选择逻辑，避免加载106MB真实评估器。
-
-确认现有测试在未开启FID选择时仍能通过，无需额外修改。
-
-已确定七步实施计划：终止当前进程、添加figure_rows与reconstruction_scores辅助函数、更新VQ训练的联合FID选择逻辑、调整AR训练的指标配置、编写Behave相关YAML、测试验证、启动训练。
-
-接下来将重新精读train.py中的验证保存逻辑及vq_training的验证代码，确保修改精确。
-
-计划在train.py中新增validate_generation函数，用于AR训练的验证评估。
-
-发现MotionDataset缺少文本嵌入与caption元数据，而EvaluatorDataset具备这些字段。因此AR验证将改用EvaluatorDataset作为FID计算的验证集，与VQ评估保持一致，同时过滤未
-</details></think>
-
-_**Agent (grok-4.7)**_
-
 <tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
 <summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/motion_text.py</summary>
 
@@ -12174,26 +11895,6 @@ _**Agent (grok-4.7)**_
 <summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/train.py</summary>
 
 </details></tool-use>
-
-_**Agent (grok-4.7)**_
-
-<think><details><summary>Thought Process</summary>
-I'll implement a shared figure metric function and wire both trainers.
-
-AR 每轮验证都生成样本是正确指标，但速度慢且受 FSDP 影响。
-
-正在 evaluate_motion_text.py 中设计共享指标函数。figure_row 提取 FID、R_Precision 和 Diversity 等关键指标，score_paired_batches 负责成对批次的评分计算。
-
-正在重构指标计算逻辑。计划新增 reconstruction_figure 与 primary_figure，分别负责完整数据集的 embedding_scores 计算和主视图指标提取。
-
-primary_figure 已实现，可按视图提取 FID、R_Precision_top1 及多样性指标。
-
-VQ 训练每轮验证调用 reconstruction_figure，耗时约 17 秒。
-
-AR 训练需要生成样本批次，计划在 train.py 或 evaluate_motion_text 中新增 generation_figure，遍历数据集并编码预测结果。
-
-发现 AR 生成流程存在数据缺失风险。complete() 需要 object_bps 字段，但 EvaluatorDataset 设置了 include_geometry=False，可能导致 MotionDataset 缺少该字段而生成失败。需要检查 MotionDataset 的 __getitem__ 是否包含 object_bps。
-</details></think>
 
 _**Agent (grok-4.7)**_
 
@@ -12234,28 +11935,10 @@ Status: **completed**
 
 _**Agent (grok-4.7)**_
 
-<think><details><summary>Thought Process</summary>
-Read data.py __getitem__ fully.
-</details></think>
-
-_**Agent (grok-4.7)**_
-
 <tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
 <summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/data.py</summary>
 
 </details></tool-use>
-
-_**Agent (grok-4.7)**_
-
-<think><details><summary>Thought Process</summary>
-object_bps comes from ParametricDataset when include_geometry=True.
-
-EvaluatorDataset 将 include_geometry 设为 False。
-
-AR 生成将使用现有的 val MotionDataset（含 object_bps），并从 EvaluatorDataset 构建 caption 到 embedding 的映射来获取文本嵌入。
-
-生成验证时，val 的 text 取 captions[0]。EvaluatorDataset 按 caption_key 存储特征，可构建特征字典后按 batch["text"] 查找。BEHAVE val 共 98 个窗口且已标注。还需确认 include_geometry=False 时
-</details></think>
 
 _**Agent (grok-4.7)**_
 
@@ -12296,91 +11979,10 @@ Status: **completed**
 
 _**Agent (grok-4.7)**_
 
-<think><details><summary>Thought Process</summary>
-object_bps is only added when include_geometry.
-
-complete() 依赖 batch["object_bps"]。
-
-AR 验证需要几何信息。EvaluatorDataset 硬编码了 include_geometry=False，无法直接用于 AR 生成。正在考虑两种方案：为 EvaluatorDataset 添加可选参数，或改用 MotionDataset 并单独加载文本特征。
-
-决定不修改 EvaluatorDataset 的几何标志。改在评分函数中从记录路径读取文本特征。MotionDataset 的 val 数据集包含 text_variants，可直接用于生成循环。
-
-VQ 重建仍沿用不加载几何信息的 EvaluatorDataset。正在编写 figure_scores 函数，将 ground_batches 与 predicted_batches 按视图编码为张量并收集。
-
-figure_scores 函数已完成。它将预测批次按视图编码为张量，收集文本嵌入、source_id 和 caption_key，并调用 embedding_scores 计算各视图指标。
-
-primary_figure 函数已开始编写。它从 reconstructed 行提取 FID 等主指标。
-
-primary_figure 函数已补全 R_Precision、Diversity、Diversity_real 等指标。
-
-计划重构 evaluate_motion_text，使其调用 figure_scores，避免重复实现。
-
-VQ 训练每 1000 步构建批次即可。
-
-选择视图将使用 joint，并在配置中显式设置 fid_view: joint。
-
-接下来准备编写 AR train.py。
-
-AR 训练将按配置中的 selection_metric 决定验证方式。若为 fid，会以生成模式 111 的 FID 作为指标，最低 FID 对应最佳结果，并打印对应指标行；其他情况保持原有 token CE 验证逻辑。
-
-三个 behave 配置文件将更新：selection_metric 设为 fid，motion_text_evaluator 指向训练目录下的 last.pt，fid_view 设为 joint。
-
-旧版 AR 运行因配置变更无法续训，但用户要求修改 behave 指标，因此接受此影响。
-
-已确定新配置文件名为 vq_behave_canonical_100k_fid.yaml，输出路径设为 runs/token_ar/behave/vq_canonical_100k_fid。contact_patience 将设为 0。
-
-vq_training 的改动如下：
-- 若开启 fid 选择，仅加载 evaluator 与 EvaluatorDataset 一次
-- 验证阶段计算 figure 指标
-- FID 改善时保存 best.pt
-- 记录 figure 指标
-- fid 选择模式下跳过几何分数计算
-
-contact 早停仅在 contact_patience 大于 0 时保留。若两个标志均为 false，行为与之前完全一致，测试仍可通过。
-
-评估器将在 codecs 构建完成后、训练循环中传入使用。加载方式沿用现有路径：以验证集记录加载 evaluator，并确保验证来源不与训练集重叠。评估器占用显存很小，可直接放在 GPU 上。
-
-计划将 evaluate_motion_text 重构为包含 reconstruction_figure 函数，使 canonical 重建逻辑与评估保持一致。正在重新阅读该函数的完整代码以确保重构干净。
-</details></think>
-
-_**Agent (grok-4.7)**_
-
 <tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
 <summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/evaluate_motion_text.py</summary>
 
 </details></tool-use>
-
-_**Agent (grok-4.7)**_
-
-<think><details><summary>Thought Process</summary>
-I'll refactor the scoring into a function used by both evaluate and training, keeping evaluate_motion_text behavior identical.
-
-将在 train.py 中添加 `generation_figure` 来生成 AR 生成图。
-
-正在实现 `generation_figure` 的具体逻辑：遍历验证窗口，以 complete 模式生成预测 batch 并编码。确认了 complete 输出与 GT 均为世界坐标系。接下来需要从 records 构建 caption_key 映射，将文本嵌入附加到 GT batch 上，用于 embedding_scores 计算。
-
-确认了 DataLoader 默认的文本 collate 行为，将沿用该模式处理 source_id 和 caption_key。
-
-针对 AR FSDP，计划让所有 rank 都执行完整的验证集推理。评分计算直接在各 rank 上进行，无需额外广播，因此 improved/best 的判定结果在所有 rank 上保持一致。
-
-generate_codes 会自动切换模型为 eval 模式，验证结束后训练循环会在下一批次开始时恢复 train 模式。temperature 设为 0，top_k 取 0 或 50 均不影响 argmax 结果。
-
-确定了随机种子策略：config seed 加上 index，确保所有 rank 上的推理结果一致。complete 会显式传入该种子。
-
-Mode 111 同时生成三个流，与单 FID 的主任务对齐，joint view 也使用全部三个生成结果。
-
-验证日志将补充各视图指标，用于填充表格。best.json 中的 score 就是 FID。
-
-验证日志将输出包含 FID、R_Precision、Diversity 等指标的 JSON 格式。使用 FID 评估时不再打印旧的 val_token_ce。
-
-selection_metric 的字符串必须与配置保持一致，否则旧检查点的元数据可能与新配置不匹配，导致恢复时出错。
-
-确认了修改 selection_metric 会破坏旧检查点的恢复，这是预期行为。
-
-接下来将实现 vq_training 的验证分支，并先终止当前进程。
-
-测试计划包括：添加 primary_figure 提取键值的单元测试；验证 select_by_fid 比较逻辑（FID 越小越好）；现有原生测试不应写入 best.pt。
-</details></think>
 
 _**Agent (grok-4.7)**_
 
@@ -12398,14 +12000,6 @@ _**Agent (grok-4.7)**_
 
 _**Agent (grok-4.7)**_
 
-<think><details><summary>Thought Process</summary>
-vq_training.py is only 225 lines.
-
-正在通读整个文件。
-</details></think>
-
-_**Agent (grok-4.7)**_
-
 <tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
 <summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/vq_training.py</summary>
 
@@ -12413,50 +12007,10 @@ _**Agent (grok-4.7)**_
 
 _**Agent (grok-4.7)**_
 
-<think><details><summary>Thought Process</summary>
-I'll implement the changes and kill the process in parallel.
-
-AR生成验证时需注意FSDP。
-
-正在实现 validate_figure 生成 mode 111。注意到 FSDP 包装器可能无法转发 model.generate_codes 等方法，需要先确认 accelerate 配置是否启用了 FSDP。
-
-FSDP 包装器不会拦截原始方法，generate_codes 可以正常调用。
-
-但 validation_batches 限制为 8 个 batch，对 FID 计算可能不足。embedding_scores 需要 32 个候选样本，8 个窗口可能无法
-</details></think>
-
-_**Agent (grok-4.7)**_
-
 <tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
 <summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/embedding_metrics.py</summary>
 
 </details></tool-use>
-
-_**Agent (grok-4.7)**_
-
-<think><details><summary>Thought Process</summary>
-FID needs at least 2 sequences.
-
-验证集共98个序列。
-
-AR训练将使用完整验证集生成98个窗口，而非仅8个batch。FID评估器会在run()中按需加载。train.py将调用complete()构建预测batch，并导入evaluate_motion_text.py中的评分函数。
-
-正在实现 `score_motion_pairs` 函数，用于评估 ground batch 与 predicted batch 的配对质量。ground batch 需要 text_embedding、source_id、caption_key 等字段，predicted batch 需要 human、object、contact、valid_frames、fps。预测字典将在循环中逐个构建。文本特征直接从 EvaluatorDataset 获取。
-
-为避免 MotionDataset 与 EvaluatorDataset 的窗口对齐问题，决定从 EvaluatorDataset 生成预测序列。但该数据集目前缺少 object_bps 字段，因此需要给 EvaluatorDataset 添加一个可选的 `include_geometry` 参数来控制是否包含几何信息，避免影响现有 VQ 评估逻辑。
-
-改用 `kwargs.setdefault("include_geometry", False)` 实现可选参数，确保现有调用方不受影响。AR 验证将显式传入 `include_geometry=True`，VQ 路径保持默认。加载 98 个验证窗口的网格数据仅在训练开始时执行一次，开销可控。
-
-已确认现有调用方无需改动，`include_geometry` 默认保持 False。AR 验证将显式传入 `include_geometry=True`。
-
-正在 train.py 中实现 `validate_figure` 函数：使用逐条采样器遍历完整数据集，准备调用 `complete` 生成预测序列并评估指标。
-
-正在实现 `validate_figure` 的具体循环逻辑：使用逐条采样器遍历数据集，对每条样本调用 `complete` 生成预测序列。生成时采用固定种子与零温度策略，确保结果可复现。随后将预测结果整理为包含 human、object、contact 及 valid_frames 的字典格式，准备送入评分函数进行配对评估。
-
-已完成 `validate_figure` 的剩余逻辑：将预测字典补充 fps 字段后与 ground batch 配对，调用 `score_motion_pairs` 评估全部指标，再汇总生成主图及各视角子图。确认 `complete()` 在开启几何信息时可正常读取 object_bps。
-
-complete() 对旧版与新版 codecs 的 canonical_scene 均兼容。发现 FSDP 下直接调用 `model.generate_codes` 可能因 DDP 包装器导致死锁或报错，需要先确认 accelerate 配置。
-</details></think>
 
 _**Agent (grok-4.7)**_
 
@@ -12473,12 +12027,6 @@ Directory: **``** (2 files)
 
 _**Agent (grok-4.7)**_
 
-<think><details><summary>Thought Process</summary>
-Read the accelerate config to see FSDP vs DDP.
-</details></think>
-
-_**Agent (grok-4.7)**_
-
 <tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
 <summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/configs/token_ar/accelerate_qwen35_4gpu.yaml</summary>
 
@@ -12490,38 +12038,6 @@ _**Agent (grok-4.7)**_
 <summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/configs/token_ar/accelerate_4gpu.yaml</summary>
 
 </details></tool-use>
-
-_**Agent (grok-4.7)**_
-
-<think><details><summary>Thought Process</summary>
-FSDP generation is tricky because generate_codes uses past_key_values and a python loop.
-
-所有rank必须同步进入每个backbone的前向传播。
-
-各rank按相同顺序处理相同窗口时，生成步数由窗口长度决定，不会因采样而不同。use_cache与FSDP共用可能有问题，但T2M风格生成在前向同步的情况下应可运行。准备实现该方案，若存在bug也需等到AR训练阶段才会暴露。
-
-当selection_metric不是fid时，保留旧验证逻辑作为后备。Behave配置已设为fid。
-
-generate_codes调用self.backbone时，FSDP通过__getattr__将调用转发到被包装的模块。self在方法内部指向原始模块，其backbone则由FSDP包裹。
-
-根模型保持未包装，仅内部解码器层参与FSDP。generate_codes调用的backbone层会触发all-gather，各rank必须同步进入这些层。
-
-实现时会根据配置更新metadata中的selection_metric字符串。fid模式下best初始值设为inf，FID越低越好，与CE逻辑一致。日志打印将使用figure而非val_token_ce。
-
-仅在fid模式下于run()中加载评估器，所有rank均加载小型评估器，泄漏检查仍使用val记录。AR的EvaluatorDataset需包含geometry。非fid路径跳过评估器加载。
-
-配置校验：selection_metric为fid时必须存在motion_text_evaluator；fid_view须在VIEWS中。VQ场景下select_by_fid为true时也要求motion_text_evaluator已配置。
-
-evaluate_motion_text.py将实现figure_metrics函数，按view计算FID指标。
-
-figure_metrics 函数将从各 view 的 reconstructed 行中提取 FID、top1/top2/top3 R_Precision、Diversity 及 ground_truth 的 Diversity。
-
-score_motion_pairs 函数已开始实现：初始化各 view 的 gt/pred 列表，以及 texts、sources、captions 列表，准备遍历 ground_truth 与 predicted 的配对。
-
-遍历 ground_truth 与 predicted 的配对时，将 batch 移至设备并编码为各 view 的 motion embedding。同时提取 text、source_id 与 caption_key。若文本窗口不足两个则报错。最终将所有文本拼接为 numpy 数组。
-
-return {v: embedding_scores(...) for v in VIEWS}
-</details></think>
 
 _**Agent (grok-4.7)**_
 
@@ -12563,40 +12079,6 @@ Status: **completed**
 
 _**Agent (grok-4.7)**_
 
-<think><details><summary>Thought Process</summary>
-source_id from collate might be a list.
-
-extend 适用于列表。若 source_id 为字符串，DataLoader 默认会将其转为列表。
-
-重构 evaluate_motion_text，将评分逻辑统一到 score_motion_pairs 中。保留窗口记录循环，但不再重复编码步骤。
-
-正在整合 VQ 训练。若启用 select_by_fid，将从 evaluate_motion_text 导入相关函数。考虑把重建逻辑封装成 reconstruct_batch，仅保留有效帧进行解码。
-
-已完成 reconstruct_batch 的具体实现。该函数对 batch 做 canonical_view 编码，再按模态解码并恢复 human/object 帧，最后拼接 valid_frames 与 fps 返回重建结果。评估和训练将共用此函数。
-
-训练时缓存验证集 EvaluatorDataset 与 loader 索引。每次验证遍历 fid_loader，用 reconstruct_batch 重建窗口并评分，再计算 figure_metrics 与各视图指标。
-
-98 个窗口的编码解码约需 17 秒，可接受。
-
-若启用 select_fid，以 FID 分数作为选择标准：当前 FID 更低则更新 best_selection 并保存 chosen.pt。
-
-将 FID、R_Precision、Diversity、Diversity_real 及各视图 FID 记录到 swanlab 日志。
-
-若同时启用 select_fid 与 select_geometry，会抛出异常，确保只按 FID 选择检查点。
-
-新配置中 contact_patience 设为 0。
-
-best_selection 会随 checkpoint 持久化，断点续训时继续比较 FID；新运行则从 inf 开始。metadata 的 selection 字段在 select_by_fid 时记录为 "lowest_validation_fid"。
-
-将 select_by_fid 写入 config，使其成为运行元数据的一部分，以便断点续训时正确识别。
-
-验证结果会把 FID 存入 payload 的 validation_fid 字段。
-
-日志打印行将与 figure_metrics 保持一致，包含 step、FID、R_Precision、Diversity、Diversity_real、view 和 selection。
-</details></think>
-
-_**Agent (grok-4.7)**_
-
 <tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
 <summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/model.py</summary>
 
@@ -12608,16 +12090,6 @@ _**Agent (grok-4.7)**_
 <summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/motion_text.py</summary>
 
 </details></tool-use>
-
-_**Agent (grok-4.7)**_
-
-<think><details><summary>Thought Process</summary>
-Order length is fixed by the builder based on token_count, not by sampled values.
-
-所有 rank 的窗口相同，因此 backbone 前向传播次数也相同。
-
-准备终止当前进程，编辑文件后重新启动训练。VQ 配置将基于 10 万步版本复制并修改。先读取现有 yaml 确认内容。
-</details></think>
 
 _**Agent (grok-4.7)**_
 
@@ -12646,15 +12118,1237 @@ ps -p 255931 -o pid,cmd --no-headers || echo 'not-running'; nvidia-smi --query-g
 
 _**Agent (grok-4.7)**_
 
-<think><details><summary>Thought Process</summary>
-Kill the process with SIGTERM, then implement code.
-</details></think>
-
-_**Agent (grok-4.7)**_
-
 <tool-use data-tool-type="shell" data-tool-name="run_terminal_command_v2"><details>
 <summary>Tool use: **run_terminal_command_v2** • Run command: kill -TERM 255931; sleep 2; ps -p 255931 -o pid,cmd --no-headers || echo &#39;stopped&#39;</summary>
 ```bash
 kill -TERM 255931; sleep 2; ps -p 255931 -o pid,cmd --no-headers || echo 'stopped'
 ```
+
+```
+stopped
+
+```
 </details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+Process stopped quickly. Confirm GPU freed and last checkpoint step.
+
+准备边写代码边执行。
+
+正在修改多个文件以统一指标计算逻辑。新增 figure_table 辅助函数处理多视角数据提取。同步调整 evaluate_motion_text.py、motion_text.py、vq_training.py 和 train.py 中的 FID 选择与验证逻辑。随后运行测试并启动训练。
+
+figure_table 已完成，支持按视角提取指标并汇总所有视角数据。evaluate_motion_text 将重构为调用 reconstruct_batch 与 score_motion_pairs。reconstruct_batch 的实现已开始编写。
+
+reconstruct_batch 的具体实现已完成。该函数先按 batch 有效帧数截取数据，再通过 codecs 提取 canonical_view 并编码为 tokens，随后对各模态执行解码还原，最后将 human 与 object 按 anchor 或 canonicalize 进行对齐，最终返回 reconstructed 字典。
+
+reconstruct_batch 的返回逻辑已补全，包含 valid_frames 与 fps。正在核对解码后张量的维度一致性：decode 可能返回 [T, D]，而 canonicalize 返回 unbatched，restore 返回 batched，需确保后续索引正确。
+
+已确认 restore 返回 unbatched [T, D]，因此 reconstruct_batch 会像现有代码一样对解码结果加 [None] 扩展 batch 维度。score_motion_pairs 的实现细节也已理清：若 pairs 已在设备上则直接 move_batch，source_id 和 caption_key 均为字符串列表，extend 可直接处理。进度打印将保留在 evaluate_motion_text 中，避免 score 函数干扰训练日志。
+
+正在修改 VQ 训练循环的验证块。将统一加载 FID 数据集一次，并在配置中加入 select_geometry 与 select_fid 的互斥校验，同时引入 figure_table、reconstruct_batch 和 score_motion_pairs 等评估函数。
+
+正在完善 FID 评估数据集的加载逻辑。从 motion_text 导入 VIEWS、EvaluatorDataset 和 load_evaluator，校验 fid_view 是否合法，并确保配置中包含 motion_text_evaluator。加载验证集后，若 captioned 窗口少于两个则抛出异常。
+
+已完成 FID 评估器的加载与单样本 DataLoader 的构建。验证循环中将按 fid_loader 逐个重建 batch，调用 score_motion_pairs 计算指标，并通过 figure_table 提取指定视角的汇总结果。
+
+正在整合 FID 选择逻辑到训练循环中。当前代码以 loss 作为 score 并默认 last.pt，需要改为按 figure["FID"] 比较并更新 best.pt。同时考虑将 figure_metrics 字典加入 checkpoint payload，并在每轮验证时高亮打印该指标。
+
+正在完善验证日志的字典结构。若存在 FID 评估结果，会将 FID、R_Precision、Diversity、Diversity_real 及各视角汇总数据一并写入 row；否则保留原有的 human_joint_cm 等字段。接下来准备接入 Swanlab。
+
+正在将验证指标整理为 Swanlab 可用的数值字典。遍历 row 中的数值字段并添加 "val/" 前缀，同时把 FID、Diversity、Diversity_real 以及各视角的 R_Precision 和 FID 指标展开为独立的键值对。
+
+已确认 modality_updates 为字典，不会被误计入 Swanlab 数值指标。正在 train.py 中引入 figure_table、score_motion_pairs、MODALITIES、EvaluatorDataset 等依赖，并准备编写 validate_figure 函数。同时会更新训练日志与元数据的打印逻辑。
+
+已确认 figure_table 返回的指标均为 JSON 可序列化格式，可直接写入 metadata.json。best.json 的 score 将按 FID 值选取。AR 验证每 1000 步使用完整验证集，会在函数中添加注释说明。temperature 与 top_k 均设为 0。complete() 内部会调用 model.eval()，验证结束后会自动恢复训练模式。正在检查 FSDP 下 generate_codes 中 motion_embeddings 权重的设备位置是否正确。
+
+会在代码中添加注释，说明所有 rank 遍历相同窗口以保证 FSDP 各层 all-gather 对齐。验证批次的含义在 CE 路径下保持不变。
+
+配置文件新增 `selection_metric: fid` 键，旧配置若缺少该键
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="unknown" data-tool-name="ripgrep_raw_search"><details>
+<summary>Tool use: **ripgrep_raw_search**</summary>
+
+Parameters:
+
+```json
+{
+  "caseInsensitive": false,
+  "glob": "*.{py,yaml,md}",
+  "outputMode": "content",
+  "path": "/share/personal/qukehua/HOI",
+  "pattern": "qwen35_4b_behave|selection_metric|vq_behave_canonical_100k"
+}
+```
+Additional data:
+
+```json
+{
+  "isPruned": true,
+  "outputMode": "content",
+  "path": "/share/personal/qukehua/HOI",
+  "pattern": "qwen35_4b_behave|selection_metric|vq_behave_canonical_100k",
+  "topFiles": [
+    {
+      "matchCount": 32,
+      "uri": "./.specstory/history/2026-11-02_02-06-17Z-gpu0-training-progress.md"
+    },
+    {
+      "matchCount": 1,
+      "uri": "./docs/TOKEN_AR.md"
+    },
+    {
+      "matchCount": 1,
+      "uri": "./README.md"
+    },
+    {
+      "matchCount": 1,
+      "uri": "./src/unified_hoi/token_ar/train.py"
+    }
+  ],
+  "totalFiles": 4,
+  "totalMatches": 35
+}
+```
+Status: **completed**
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+The process was killed. I should implement the code now.
+
+同时检查已停止运行的 last.pt 步数，以便并行记录。
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="unknown" data-tool-name="ripgrep_raw_search"><details>
+<summary>Tool use: **ripgrep_raw_search**</summary>
+
+Parameters:
+
+```json
+{
+  "caseInsensitive": false,
+  "outputMode": "content",
+  "path": "/share/personal/qukehua/HOI/tests",
+  "pattern": "evaluate_motion_text|figure_metrics|EvaluatorDataset\\("
+}
+```
+Additional data:
+
+```json
+{
+  "isPruned": true,
+  "outputMode": "content",
+  "path": "/share/personal/qukehua/HOI/tests",
+  "pattern": "evaluate_motion_text|figure_metrics|EvaluatorDataset\\(",
+  "topFiles": [],
+  "totalFiles": 0,
+  "totalMatches": 0
+}
+```
+Status: **completed**
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
+<summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/configs/token_ar/qwen35_4b_behave.yaml</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+I'll implement all edits now.
+
+For train.py validate_figure, I need to be careful about batch["valid_frames"].sum() - it might be a tensor.
+
+int() 可以正常处理。complete 返回的值是 [T, D] 的一维序列。
+
+验证了 GT 与预测张量的长度对齐。GT 按 valid_frames 截断，预测张量长度设为 n，两者经 encode_motion 编码后帧数一致。
+
+已确认 source_id 的字符串格式在 collate 中正确扩展为列表。接下来将编写文件，并检查 qwen3 YAML 末尾是否需要追加键值。同时准备在 test_vq_upgrade.py 中添加一个不依赖 GPU 的单元测试，验证 figure_table 是否包含请求的列。
+
+已编写 figure_table 的单元测试。验证了 joint 视图索引为 3，且表中包含 FID、R_Precision（top1/top2/top3）和 Diversity 等预期列。
+
+FID 越低越优的逻辑已在 vq_training 中验证，figure_table 的单元测试已足够。接下来将检查测试类名并添加方法，补充对无效视图的拒绝测试。
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="unknown" data-tool-name="ripgrep_raw_search"><details>
+<summary>Tool use: **ripgrep_raw_search**</summary>
+
+Parameters:
+
+```json
+{
+  "caseInsensitive": false,
+  "outputMode": "content",
+  "path": "/share/personal/qukehua/HOI/tests/test_vq_upgrade.py",
+  "pattern": "^class |def test_"
+}
+```
+Additional data:
+
+```json
+{
+  "isPruned": true,
+  "outputMode": "content",
+  "path": "/share/personal/qukehua/HOI/tests/test_vq_upgrade.py",
+  "pattern": "^class |def test_",
+  "topFiles": [
+    {
+      "matchCount": 11,
+      "uri": "tests/test_vq_upgrade.py"
+    }
+  ],
+  "totalFiles": 1,
+  "totalMatches": 11
+}
+```
+Status: **completed**
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+I'll add test to EmbeddingTests.
+
+正在编写全部代码，最后会做最终检查。
+
+正在修改 train.py 的导入和 vq_training 验证块。准备重写 evaluate_motion_text 函数体，同时确保 score_motion_pairs 的参数协议与 embedding_scores 保持一致。
+
+正在实现 score_motion_pairs 的具体编码逻辑。对每对 ground/predicted 运动数据，遍历 VIEWS 编码运动特征并收集文本、source_id 与 caption_key。
+
+score_motion_pairs 已完成。它在每对数据上编码运动特征并调用 embedding_scores 计算各视角指标，同时保留了 FID 至少两个窗口的校验。
+
+evaluate_motion_text 仍会逐对遍历数据并追踪窗口数，进度打印也保留在该函数内部。
+
+正在权衡编码时机以节省显存。若在循环内预编码全部运动数据，98 个窗口的张量会占用大量 GPU 内存；而旧代码直接编码后将嵌入保存在 CPU 上，体积更小。因此考虑将编码与评分解耦，设计 FigureAccumulator 类来累积结果，避免同时持有完整运动数据。
+
+决定保留 pairs 在 GPU 上暂存。98 个窗口的运动数据约 96 MB，显存占用可接受。
+
+训练循环将改为先收集全部 reconstructed pairs，再统一调用 score_motion_pairs 计算指标。
+
+正在实现 train.py 的 validate_figure。该函数将通过 complete 生成 pairs，再调用 score_motion_pairs 计算指标。
+
+确认直接使用传入的 prepared model（可能为 FSDP 包装）即可，无需额外 unwrap。
+
+会在验证循环前显式设置 model.eval()，验证结束后恢复训练模式。
+
+正在编写 YAML 配置文件。为 Qwen 系列追加 selection_metric、fid_view 和 motion_text_evaluator 路径，按各模型结构差异插入对应位置。同时新建 VQ 的 YAML 配置。
+
+代码完成后会先用 Python 检查已停止 checkpoint 的步数，并确认 GPU 0 可用。
+
+训练启动命令将设为后台阻塞模式，确保训练立即开始。
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+训练已经停掉。接下来把 BEHAVE 的 VAE 和主模型验证改成图里的 FID、R-precision 和 Diversity，并用最低 FID 选 `best.pt`，然后重新开 10 万步 VAE。
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2** • Edit file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/motion_text.py</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2** • Edit file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/evaluate_motion_text.py</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2** • Edit file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/evaluate_motion_text.py</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+Need to check if embedding_scores import is still used in evaluate_motion_text.py - yes it's used in score_motion_pairs.
+
+canonicalize 在 reconstruct_batch 中被使用。
+
+MODALITIES 已确认使用。接下来修改 vq_training.py 和 train.py。
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2** • Edit file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/vq_training.py</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2** • Edit file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/vq_training.py</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+There's a bug: I set metadata["selection"] AFTER metadata is used in resume comparison...
+
+正在检查代码执行顺序。fid加载被插入在contact_patience之后，而metadata在resume比较中已被使用，因此怀疑metadata["selection"]的赋值时机确实存在问题。
+
+重新检查了代码逻辑。selection 不在 resume 比较的键列表中，因此即使在 resume 之后更新该值也不会触发配置不匹配。新运行不受影响，resume 场景下保存的 metadata 通过 codec_payload 嵌入 payload 中。
+
+确认 fid_loader 在 resume 时仍需创建。metadata 的更新时机没有问题，因为 resume 比较的是原始配置而非更新后的元数据。接下来将修改 train.py。
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2** • Edit file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/train.py</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2** • Edit file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/train.py</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2** • Edit file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/train.py</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2** • Edit file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/train.py</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2** • Edit file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/train.py</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2** • Edit file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/train.py</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+There's a bug: fid_selection and evaluator are used in run() but I inserted the dataset creation BEFORE old = read_metadata and model build.
+
+正在检查 train.py 中的代码顺序。
+
+已确认 evaluator 与 fid 数据集加载相互独立，顺序没有问题。resume 比对在 metadata 构建之后进行，若旧配置缺少 selection_metric 会触发失败，这是 behave yamls 的预期行为。
+
+旧 AR 运行若用新 yaml 恢复会失败，这符合预期。接下来将写入 yaml 并测试。另外注意到 vq_training 中 resume 后 metadata["selection"] 会被重新赋值，保存的 payload 也会包含更新后的 metadata。
+
+已确认 codec_payload 不会保存更新后的 metadata selection，resume 比对不会因此出错。select_fid 块所需的 device、support 和 metadata 均在 contact_patience 之前定义，不存在引用顺序问题。evaluate_motion_text 中 embedding_scores 与 canonicalize 的导入和使用也正常。
+
+确认了 evaluate 中 embedding_scores 的导入位置正确。figure_table 会调用 figure_metrics，若 view 不在 VIEWS 中则会抛出异常，逻辑无误。select_by_fid 缺失时默认回退到旧版几何选择行为。接下来将添加测试并写入 yaml 文件。
+
+contact_patience 为 0 时会跳过接触早停逻辑，这符合预期。
+
+接下来将编写新 yaml 并更新 AR yamls。会在 EmbeddingTests 中补充测试用例，然后运行测试。
+
+已确认 reconstruct_batch 的 codecs.restore 返回形状与旧代码路径一致。
+
+注意到 score_motion_pairs 中 extend source_id 存在隐患：若 collate 返回字符串而非列表，extend 会把字符串拆成单个字符追加进去。
+
+已确认 source_id 在 collate 后为列表格式，此前的 extend 操作在生产环境运行正常。现在开始写入文件。
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2** • Edit file: /share/personal/qukehua/HOI/configs/token_ar/vq_behave_canonical_100k_fid.yaml</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2** • Edit file: /share/personal/qukehua/HOI/configs/token_ar/qwen35_4b_behave.yaml</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2** • Edit file: /share/personal/qukehua/HOI/configs/token_ar/qwen3_4b_behave.yaml</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2** • Edit file: /share/personal/qukehua/HOI/configs/token_ar/qwen3_8b_behave.yaml</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="write" data-tool-name="edit_file_v2"><details>
+<summary>Tool use: **edit_file_v2** • Edit file: /share/personal/qukehua/HOI/tests/test_vq_upgrade.py</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+Need to verify vq_training metadata mutation happens after metadata exists, and that resume of old runs isn't broken.
+
+检查 train.py 语法与 fid_selection 作用域。确认 evaluate_motion_text 导入正常。运行测试。排查 vq_training 中 metadata["selection"] 的存储问题：resume 检查依赖保存的配置，而该字段通过 codec_payload 存入 checkpoint；需验证 figure_metrics=None 对非 fid 场景及 torch.save 的兼容性。
+
+确认了 figure_metrics 在 fid 与非 fid 场景下的传参均安全。resume 时 best_selection 不会因新运行而误用旧值。接下来将检查 fid 块内 metadata 的赋值顺序是否正确。另外确认 train.py 中 evaluator 与数据集的加载时机合理，FSDP 下 evaluator 会在各 rank 准备前完成加载。
+
+确认 evaluator 未被 FSDP 包装，score_motion_pairs 仅调用本地 encode，生成仍使用 FSDP 模型。将运行测试并检查 stopped checkpoint 步数。排查 vq_training 后发现 metadata 的写入时机正确，且 resume 逻辑比对的是 trainer 等配置而非 selection 字段。
+
+非 fid 运行 resume 时，metadata 的 selection 字段与 checkpoint 一致，不会触发误判。fid 运行 resume 时，该字段同样匹配。接下来将运行测试和 CLI 帮助检查。原生测试未设置 select_by_fid，因此 best.pt 不应存在，若不写入 best.pt 则测试仍能通过。
+
+确认原生测试的验证集仅走 validate_report，且 select_fid 为 false。将运行 native 与 embedding 测试，并对 train.py 做编译检查。另外验证了 evaluate_motion_text.py 中 restore 返回的是单条张量，不会因 [None] 导致 encode 报错。
+
+确认 codecs.restore 的调用未被改动。将运行测试并检查 last.pt 步数与 GPU 占用。同时核对 train.py 缩进是否正确。vq_training 中 figure_table 的导入位于设备设置之后，若 evaluator 路径错误会在训练启动前报
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
+<summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/vq_training.py</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
+<summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/train.py</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+There's a closure issue: figure_table, reconstruct_batch, score_motion_pairs are imported inside `if select_fid` in run_independent.
+
+这些变量仅在 `select_fid` 为真时才被赋值，因此在循环中使用时可能未定义。
+
+确认了 Python 作用域规则：只要 `select_fid` 为真，循环内的变量就会被提前赋值，不会触发未绑定错误。接下来将运行单元测试，并检查 train_codecs 和 train 模块的 CLI 帮助命令。
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="unknown" data-tool-name="ripgrep_raw_search"><details>
+<summary>Tool use: **ripgrep_raw_search**</summary>
+
+Parameters:
+
+```json
+{
+  "caseInsensitive": false,
+  "contextAfter": 15,
+  "outputMode": "content",
+  "path": "/share/personal/qukehua/HOI/src/unified_hoi/token_ar/train_codecs.py",
+  "pattern": "def validate_report"
+}
+```
+Additional data:
+
+```json
+{
+  "isPruned": true,
+  "outputMode": "content",
+  "path": "/share/personal/qukehua/HOI/src/unified_hoi/token_ar/train_codecs.py",
+  "pattern": "def validate_report",
+  "topFiles": [
+    {
+      "matchCount": 16,
+      "uri": "src/unified_hoi/token_ar/train_codecs.py"
+    }
+  ],
+  "totalFiles": 1,
+  "totalMatches": 1
+}
+```
+Status: **completed**
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+validate_report calls model.eval() before FID if we call validate_report first.
+
+正在检查训练循环的执行顺序。
+
+确认了 eval 模式在 FID 计算前已正确设置。准备运行测试并启动训练。检查了函数导入和循环命名的语法问题。将从 last.pt 加载已停止训练的步数。
+
+确认 GPU 0 已释放后，准备后台启动训练。已检查父进程状态正常。
+
+已确定后台启动命令。计划先运行测试，确认 GPU 0 空闲后再启动训练，并行运行 help 命令。正在检查 native 测试是否占用 GPU。
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
+<summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/tests/test_vq_upgrade.py</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+Native test uses temp dir and a tiny config.
+
+不应触发 select_by_fid。
+
+确认 best.pt 不存在。将设置工作目录并编译模块。准备并行运行测试、帮助、检查点和 NVIDIA 相关检查。测试通过前不会启动训练。
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="shell" data-tool-name="run_terminal_command_v2"><details>
+<summary>Tool use: **run_terminal_command_v2** • Run command: .venv/bin/python -B -m unittest tests.test_vq_upgrade.EmbeddingTests.test_figure_table_uses_fid_rprecision_and_diversity tests.test_vq_upgrade.TemporalEMATests tests.test_vq_upgrade.NativeUpgradeTests &amp;&amp; .venv/bin/python -B -m unified_hoi.token_ar.train_codecs --help &gt;/dev/null &amp;&amp; .venv/bin/python -B -m unified_hoi.token_ar.train --help &gt;/dev/null &amp;&amp; .venv/bin/python -B -c &#34;
+import torch
+p=&#39;runs/token_ar/behave/vq_canonical_100k/last.pt&#39;
+s=torch.load(p, map_location=&#39;cpu&#39;, weights_only=True)
+print(&#39;stopped_step&#39;, s.get(&#39;step&#39;), &#39;updates&#39;, s.get(&#39;modality_updates&#39;), &#39;frozen&#39;, s.get(&#39;contact_frozen&#39;))
+&#34;</summary>
+```bash
+.venv/bin/python -B -m unittest tests.test_vq_upgrade.EmbeddingTests.test_figure_table_uses_fid_rprecision_and_diversity tests.test_vq_upgrade.TemporalEMATests tests.test_vq_upgrade.NativeUpgradeTests && .venv/bin/python -B -m unified_hoi.token_ar.train_codecs --help >/dev/null && .venv/bin/python -B -m unified_hoi.token_ar.train --help >/dev/null && .venv/bin/python -B -c "
+import torch
+p='runs/token_ar/behave/vq_canonical_100k/last.pt'
+s=torch.load(p, map_location='cpu', weights_only=True)
+print('stopped_step', s.get('step'), 'updates', s.get('modality_updates'), 'frozen', s.get('contact_frozen'))
+"
+```
+
+```
+......
+----------------------------------------------------------------------
+Ran 6 tests in 7.242s
+
+OK
+Traceback (most recent call last):
+  File "<string>", line 4, in <module>
+  File "/share/personal/qukehua/HOI/.venv/lib/python3.12/site-packages/torch/serialization.py", line 1530, in load
+    with _open_file_like(f, "rb") as opened_file:
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/personal/qukehua/HOI/.venv/lib/python3.12/site-packages/torch/serialization.py", line 795, in _open_file_like
+    return _open_file(name_or_buffer, mode)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/personal/qukehua/HOI/.venv/lib/python3.12/site-packages/torch/serialization.py", line 776, in __init__
+    super().__init__(open(name, mode))  # noqa: SIM115
+                     ^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'runs/token_ar/behave/vq_canonical_100k/last.pt'
+
+```
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+Tests passed (6 tests OK) but then torch.load failed because last.pt doesn't exist?
+
+EmbeddingTests 中还有更多未被选中的测试。
+
+测试通过后 help 命令执行成功，失败来自 python -c 中的 torch.load。last.pt 缺失可能是保存中断或路径错误。
+
+正在排查 last.pt 缺失的具体原因。SIGTERM 可能在保存临时文件时中断，但 replace 操作是原子的，因此 last.pt 理论上不应被覆盖。接下来将检查该路径下实际存在的文件。
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="search" data-tool-name="glob_file_search"><details>
+<summary>Tool use: **glob_file_search** • Searched codebase "" • **0** results in **1** directory</summary>
+
+Directory: **`/share/personal/qukehua/HOI`** (0 files)
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="shell" data-tool-name="run_terminal_command_v2"><details>
+<summary>Tool use: **run_terminal_command_v2** • Run command: nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv,noheader; ls -lh runs/token_ar/behave/vq_canonical_100k 2&gt;/dev/null || echo &#39;missing dir&#39;; ps -ef | rg -n &#34;train_codecs|vq_canonical&#34; || true</summary>
+```bash
+nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv,noheader; ls -lh runs/token_ar/behave/vq_canonical_100k 2>/dev/null || echo 'missing dir'; ps -ef | rg -n "train_codecs|vq_canonical" || true
+```
+
+```
+0, 4 MiB, 0 %
+1, 4 MiB, 0 %
+2, 4 MiB, 0 %
+3, 2558 MiB, 16 %
+total 4.0K
+drwxr-xr-x 3 root root 4.0K Nov  5 15:56 swanlog
+35:root      272484  272476  0 16:09 ?        00:00:00 rg -n train_codecs|vq_canonical
+
+```
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+The checkpoint directory only has swanlog!
+
+last.pt 和 best.pt 已丢失，这会造成问题。
+
+正在排查 last.pt 和 best.pt 丢失的原因。怀疑是保存时的原子替换异常，或训练进程写入了其他文件系统路径。
+
+正在搜索 last.pt 的残留副本。同时注意到 /tmp 目录下可能有备份文件。
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="shell" data-tool-name="run_terminal_command_v2"><details>
+<summary>Tool use: **run_terminal_command_v2** • Run command: ls -lh /tmp/vq_canonical_100k*.pt /tmp/vq_canonical_step*.pt 2&gt;/dev/null; find /share/personal/qukehua/HOI/runs/token_ar/behave -maxdepth 2 -type d -printf &#39;%p\n&#39; 2&gt;/dev/null; find /share/personal/qukehua/HOI/runs/token_ar/behave/vq_canonical_100k -type f -printf &#39;%p %s\n&#39; 2&gt;/dev/null | head</summary>
+```bash
+ls -lh /tmp/vq_canonical_100k*.pt /tmp/vq_canonical_step*.pt 2>/dev/null; find /share/personal/qukehua/HOI/runs/token_ar/behave -maxdepth 2 -type d -printf '%p\n' 2>/dev/null; find /share/personal/qukehua/HOI/runs/token_ar/behave/vq_canonical_100k -type f -printf '%p %s\n' 2>/dev/null | head
+```
+
+```
+-rw-r--r-- 1 root root 465M Nov  5 15:15 /tmp/vq_canonical_100k_best.pt
+-rw-r--r-- 1 root root 465M Nov  5 15:32 /tmp/vq_canonical_100k_last.pt
+-rw-r--r-- 1 root root 465M Nov  5 15:37 /tmp/vq_canonical_100k_last_fid.pt
+-rw-r--r-- 1 root root 340M Nov  4 15:36 /tmp/vq_canonical_step11000.pt
+-rw-r--r-- 1 root root 340M Nov  5 10:26 /tmp/vq_canonical_step64000.pt
+/share/personal/qukehua/HOI/runs/token_ar/behave
+/share/personal/qukehua/HOI/runs/token_ar/behave/motion_text_evaluator
+/share/personal/qukehua/HOI/runs/token_ar/behave/vq_canonical_100k
+/share/personal/qukehua/HOI/runs/token_ar/behave/vq_canonical_100k/swanlog
+
+```
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+The durable checkpoints under runs/ are gone except swanlog!
+
+不过 /tmp 目录下还有备份副本。
+
+准备从 /tmp 恢复 last.pt 和 best.pt 到 run 目录，避免暂停的训练丢失。发现 512x512 和 64k 的运行目录也已缺失，需要进一步仔细排查。
+
+旧运行目录可能已被他人删除，不再重建。重点恢复 /tmp 中 100k 的 last.pt 和 best.pt。日志显示 last.pt 在 kill 前已消失，没有 .partial 文件残留。
+
+排查了 checkpoint 保存机制，发现代码在写入时会先创建 .partial 文件再替换原文件。若保存过程中被中断，last.pt 理应残留为 .partial，但 best.pt 同样消失，因此无法解释两个文件同时丢失。推测可能是其他进程或清理脚本删除了整个 run 目录（除 swanlog 外）。接下来准备查看日志尾部确认原因。
+
+/tmp 中的 last.pt 与 best.pt 修改时间分别为 15:32 和 15:15，可能并非训练最新快照。需要查看日志确认最后保存步数及进程是否在保存时中断。
+
+决定先读取日志确认最后保存步数和报错原因，再检查 checkpoint 是否因工作目录变更写到了其他路径。随后将 /tmp 中的 last.pt 和 best.pt 恢复到 run 目录，避免暂停的训练彻底丢失。
+
+进程命令使用了相对路径，工作目录可能并非 HOI 根目录。由于进程已终止，无法直接查看 /proc 信息。接下来将检查 /tmp/hoi_behave_vq_canonical_100k.log 中的输出目录记录，并搜索系统中是否还有其他
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="shell" data-tool-name="run_terminal_command_v2"><details>
+<summary>Tool use: **run_terminal_command_v2** • Run command: ls -lh /tmp/hoi_behave_vq_canonical_100k.log; echo &#39;---- tail ----&#39;; tail -n 30 /tmp/hoi_behave_vq_canonical_100k.log; echo &#39;---- find pt ----&#39;; find /share/personal/qukehua/HOI/runs /tmp -name &#39;last.pt&#39; -o -name &#39;best.pt&#39; -o -name &#39;last.partial&#39; 2&gt;/dev/null | head -50</summary>
+```bash
+ls -lh /tmp/hoi_behave_vq_canonical_100k.log; echo '---- tail ----'; tail -n 30 /tmp/hoi_behave_vq_canonical_100k.log; echo '---- find pt ----'; find /share/personal/qukehua/HOI/runs /tmp -name 'last.pt' -o -name 'best.pt' -o -name 'last.partial' 2>/dev/null | head -50
+```
+
+```
+-rw-r--r-- 1 root root 620K Nov  5 16:03 /tmp/hoi_behave_vq_canonical_100k.log
+---- tail ----
+{"step": 15340, "modality_updates": {"human": 15340, "object": 15340, "contact": 3000}, "human_loss": 0.3271464705467224, "human_reconstruction": 0.20027965307235718, "human_vq": 0.09320087730884552, "human_velocity": 0.06733192503452301, "human_perplexity": 344.9539794921875, "human_resets": 0.0, "human_root_deg": 2.048006772994995, "human_body_deg": 6.020174980163574, "human_trans_cm": 2.3057503700256348, "human_joint_cm": 3.368917942047119, "object_loss": 0.15352684259414673, "object_reconstruction": 0.08463127166032791, "object_vq": 0.04997861385345459, "object_velocity": 0.03783392906188965, "object_perplexity": 275.2029724121094, "object_resets": 0.0, "object_rot_deg": 2.7677667140960693, "object_trans_cm": 4.126570701599121}
+{"step": 15360, "modality_updates": {"human": 15360, "object": 15360, "contact": 3000}, "human_loss": 0.3482154905796051, "human_reconstruction": 0.21147048473358154, "human_vq": 0.10258033871650696, "human_velocity": 0.068329356610775, "human_perplexity": 355.18023681640625, "human_resets": 0.0, "human_root_deg": 2.031707525253296, "human_body_deg": 6.196388244628906, "human_trans_cm": 2.474012851715088, "human_joint_cm": 3.6481804847717285, "object_loss": 0.15390242636203766, "object_reconstruction": 0.08632048219442368, "object_vq": 0.04833324998617172, "object_velocity": 0.03849738836288452, "object_perplexity": 272.83721923828125, "object_resets": 0.0, "object_rot_deg": 2.811378002166748, "object_trans_cm": 4.330068111419678}
+{"step": 15380, "modality_updates": {"human": 15380, "object": 15380, "contact": 3000}, "human_loss": 0.33940064907073975, "human_reconstruction": 0.20439723134040833, "human_vq": 0.10031355917453766, "human_velocity": 0.06937965750694275, "human_perplexity": 341.4383544921875, "human_resets": 0.0, "human_root_deg": 2.1930270195007324, "human_body_deg": 6.061965465545654, "human_trans_cm": 2.3680951595306396, "human_joi
+… (output truncated)
+```
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+The log was still being written until 16:03 and the tail shows step 15920 without a traceback.
+
+怀疑被终止的进程是255931，时间约在16:09。
+
+日志在15600步处被截断，未出现16000步的验证行。终止时间约在16:09，与日志最后记录的15920步存在时间差。
+
+last.pt已丢失，仅剩日志文件。怀疑训练写入了其他目录或挂载点。准备搜索日志中的输出路径和465MB文件。
+
+正在排查last.pt丢失的根因。SIGTERM终止不会删除检查点，且finish_swanlab也不会清理文件。怀疑目录是符号链接，实际文件可能位于其他路径。准备读取符号链接指向，并搜索大体积pt文件。
+
+怀疑last.pt可能在进程打开期间被删除，导致目录中消失但进程仍可读取，终止后文件随之丢失。准备扩大搜索范围，查找vq_canonical相关文件。
+
+优先恢复暂停实验。/tmp中的last.pt是15:32的备份，早于15920步，可能只有14000步或15000步的检查点。准备快速核对/tmp文件步数和日志验证行，定位丢失的权重。新训练才是当前任务。
+
+准备将 /tmp 中的备份检查点复制回暂停实验目录，避免工作丢失。同时会核对 /tmp 文件步数，并在 /share 与 /tmp 下搜索 vq_canonical.pt。
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="unknown" data-tool-name="ripgrep_raw_search"><details>
+<summary>Tool use: **ripgrep_raw_search**</summary>
+
+Parameters:
+
+```json
+{
+  "caseInsensitive": false,
+  "outputMode": "content",
+  "path": "/tmp/hoi_behave_vq_canonical_100k.log",
+  "pattern": "\"step\": 15000|\"step\": 16000|selection"
+}
+```
+Additional data:
+
+```json
+{
+  "isPruned": true,
+  "outputMode": "content",
+  "path": "/tmp/hoi_behave_vq_canonical_100k.log",
+  "pattern": "\"step\": 15000|\"step\": 16000|selection",
+  "topFiles": [
+    {
+      "matchCount": 16,
+      "uri": "/tmp/hoi_behave_vq_canonical_100k.log"
+    }
+  ],
+  "totalFiles": 1,
+  "totalMatches": 16
+}
+```
+Status: **completed**
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="shell" data-tool-name="run_terminal_command_v2"><details>
+<summary>Tool use: **run_terminal_command_v2** • Run command: .venv/bin/python -B -c &#34;
+import torch
+for p in [&#39;/tmp/vq_canonical_100k_last.pt&#39;,&#39;/tmp/vq_canonical_100k_best.pt&#39;,&#39;/tmp/vq_canonical_100k_last_fid.pt&#39;]:
+    s=torch.load(p, map_location=&#39;cpu&#39;, weights_only=True)
+    print(p, &#39;step&#39;, s.get(&#39;step&#39;), &#39;updates&#39;, s.get(&#39;modality_updates&#39;), &#39;best&#39;, s.get(&#39;best_selection&#39;))
+&#34;</summary>
+```bash
+.venv/bin/python -B -c "
+import torch
+for p in ['/tmp/vq_canonical_100k_last.pt','/tmp/vq_canonical_100k_best.pt','/tmp/vq_canonical_100k_last_fid.pt']:
+    s=torch.load(p, map_location='cpu', weights_only=True)
+    print(p, 'step', s.get('step'), 'updates', s.get('modality_updates'), 'best', s.get('best_selection'))
+"
+```
+
+```
+/tmp/vq_canonical_100k_last.pt step 14000 updates {'human': 14000, 'object': 14000, 'contact': 3000} best 76.00263166427612
+/tmp/vq_canonical_100k_best.pt step 2000 updates {'human': 2000, 'object': 2000, 'contact': 2000} best 76.00263166427612
+/tmp/vq_canonical_100k_last_fid.pt step 14000 updates {'human': 14000, 'object': 14000, 'contact': 3000} best 76.00263166427612
+
+```
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+The run directory lost last.pt.
+
+日志显示第15000步已保存。
+
+进程在第15920步被终止。磁盘上找不到last.pt，可能已被清理或损坏。我将恢复第2000步的最优模型，并记录第14000步是目前仅存的备份。
+
+正在将第14000步的last.pt和第2000步的best.pt复制回运行目录，以恢复训练现场。
+
+正在全局搜索last.pt的残留文件。恢复备份后将立即启动新训练。vq_canonical_512x512目录可能已被清理，暂不深究。
+
+已复核代码，确认 EvaluatorDataset 的 include_geometry 参数修复正确，各调用点均兼容。现在启动训练，依次完成 fit_normalization、加载 evaluator 和 swanlab 初始化。
+
+先完成 checkpoint 的复制，再启动训练，避免磁盘 IO 影响首轮。随后将导入已编辑的模块验证语法。
+
+已验证 evaluate_motion_text、vq_training 和 train 模块的导入语法无误。确认 validate_figure 中 fid_selection 位于 run() 闭包内，且 reconstruct_batch 等变量在 vq_training 的条件导入后仍可正常调用。正在检查验证循环的缩
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
+<summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/src/unified_hoi/token_ar/vq_training.py</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+codec_payload might not accept extra keys if it has a fixed schema.
+
+已将 figure_metrics 作为第二个参数传入 codec_payload 的字典中。
+
+正在查看 codec_payload 的实现。
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="unknown" data-tool-name="ripgrep_raw_search"><details>
+<summary>Tool use: **ripgrep_raw_search**</summary>
+
+Parameters:
+
+```json
+{
+  "caseInsensitive": false,
+  "contextAfter": 20,
+  "outputMode": "content",
+  "path": "/share/personal/qukehua/HOI/src/unified_hoi/token_ar/codecs.py",
+  "pattern": "def codec_payload"
+}
+```
+Additional data:
+
+```json
+{
+  "isPruned": true,
+  "outputMode": "content",
+  "path": "/share/personal/qukehua/HOI/src/unified_hoi/token_ar/codecs.py",
+  "pattern": "def codec_payload",
+  "topFiles": [
+    {
+      "matchCount": 3,
+      "uri": "src/unified_hoi/token_ar/codecs.py"
+    }
+  ],
+  "totalFiles": 1,
+  "totalMatches": 1
+}
+```
+Status: **completed**
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+figure_metrics in metadata is fine.
+
+若 figure 为包含嵌套视图的字典，torch.save 可直接处理。
+
+确认了 codec_config 的重复键风险：metadata 中的配置会覆盖模型中的同名字段，但不会影响 figure_metrics。figure 中的值均为浮点数，不含张量。接下来将启动后台训练，并通过 cp 恢复暂停运行的检查点。
+
+fit_normalization 与 evaluator 数据集加载预计耗时 1-2 分钟。将使用 block_until_ms 0 启动训练，并通过 shell 命令轮询日志，等待出现 "step": 1 的标记后再继续。
+
+已确定训练启动命令：使用 venv 中的 Python 直接运行 `train_codecs`，并将输出重定向到 `/tmp/hoi_behave_vq_canonical_100k_fid.log`。随后将轮询该日志文件，等待出现 `"step": 1` 或报错信息，超时后会打印日志尾部并检查训练进程是否仍在运行。
+
+block_until_ms 将设为 180000 或 240000 毫秒，以覆盖 fit 与 swanlab 登录的耗时。检查点复制将与训练启动顺序执行，避免 IO 竞争；新训练在前 1000 步写入量极少，因此提前复制不会造成影响。同时也在排查 last.pt 缺失是否因目录位于不同文件系统或快照导致。
+
+已将存活的 best.pt 与 last.pt 复制回训练目录。last.pt 实际对应第 14000 步，而非 15000 步。接下来将启动训练，并核对 qwen35 的 YAML 配置。
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
+<summary>Tool use: **read_file_v2** • Read file: /share/personal/qukehua/HOI/configs/token_ar/qwen35_4b_behave.yaml</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="shell" data-tool-name="run_terminal_command_v2"><details>
+<summary>Tool use: **run_terminal_command_v2** • Run command: cp -n /tmp/vq_canonical_100k_best.pt runs/token_ar/behave/vq_canonical_100k/best.pt &amp;&amp; cp -n /tmp/vq_canonical_100k_last.pt runs/token_ar/behave/vq_canonical_100k/last.pt &amp;&amp; ls -lh runs/token_ar/behave/vq_canonical_100k/*.pt</summary>
+```bash
+cp -n /tmp/vq_canonical_100k_best.pt runs/token_ar/behave/vq_canonical_100k/best.pt && cp -n /tmp/vq_canonical_100k_last.pt runs/token_ar/behave/vq_canonical_100k/last.pt && ls -lh runs/token_ar/behave/vq_canonical_100k/*.pt
+```
+
+```
+-rw-r--r-- 1 root root 465M Nov  5 16:11 runs/token_ar/behave/vq_canonical_100k/best.pt
+-rw-r--r-- 1 root root 465M Nov  5 16:11 runs/token_ar/behave/vq_canonical_100k/last.pt
+
+```
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+The restore used cp -n and the timestamps are now 16:11 which is the copy time.
+
+内容来自 /tmp 文件，其中 step 14000 是最后一步，step 2000 是最佳步。
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="shell" data-tool-name="run_terminal_command_v2"><details>
+<summary>Tool use: **run_terminal_command_v2** • Run command: .venv/bin/python -u -B -m unified_hoi.token_ar.train_codecs --config configs/token_ar/vq_behave_canonical_100k_fid.yaml &gt; /tmp/hoi_behave_vq_canonical_100k_fid.log 2&gt;&amp;1</summary>
+```bash
+.venv/bin/python -u -B -m unified_hoi.token_ar.train_codecs --config configs/token_ar/vq_behave_canonical_100k_fid.yaml > /tmp/hoi_behave_vq_canonical_100k_fid.log 2>&1
+```
+
+```
+]633;C
+```
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+Wait for step 1 or error. I'll poll the log.
+
+准备用 shell 的 sleep 循环来轮询日志。
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="shell" data-tool-name="run_terminal_command_v2"><details>
+<summary>Tool use: **run_terminal_command_v2** • Run command: for i in $(seq 1 48); do
+  if grep -q &#39;&#34;step&#34;: 1,&#39; /tmp/hoi_behave_vq_canonical_100k_fid.log 2&gt;/dev/null; then echo READY; break; fi
+  if grep -q &#39;Traceback&#39; /tmp/hoi_behave_vq_canonical_100k_fid.log 2&gt;/dev/null; then echo FAILED; break; fi
+  sleep 5
+done
+echo &#39;---- log ----&#39;
+wc -l /tmp/hoi_behave_vq_canonical_100k_fid.log
+tail -n 40 /tmp/hoi_behave_vq_canonical_100k_fid.log
+echo &#39;---- proc ----&#39;
+ps -p 272722 -o pid,cmd --no-headers || echo &#39;wrapper-exited&#39;
+pgrep -af &#39;vq_behave_canonical_100k_fid&#39; || true
+nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv,noheader</summary>
+```bash
+for i in $(seq 1 48); do
+  if grep -q '"step": 1,' /tmp/hoi_behave_vq_canonical_100k_fid.log 2>/dev/null; then echo READY; break; fi
+  if grep -q 'Traceback' /tmp/hoi_behave_vq_canonical_100k_fid.log 2>/dev/null; then echo FAILED; break; fi
+  sleep 5
+done
+echo '---- log ----'
+wc -l /tmp/hoi_behave_vq_canonical_100k_fid.log
+tail -n 40 /tmp/hoi_behave_vq_canonical_100k_fid.log
+echo '---- proc ----'
+ps -p 272722 -o pid,cmd --no-headers || echo 'wrapper-exited'
+pgrep -af 'vq_behave_canonical_100k_fid' || true
+nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv,noheader
+```
+
+```
+READY
+---- log ----
+9 /tmp/hoi_behave_vq_canonical_100k_fid.log
+WARNING: You are using a SMPL+H model, with only 10 shape coefficients.
+WARNING: You are using a SMPL+H model, with only 10 shape coefficients.
+swanlab: Tracking run with swanlab version 0.10.1
+swanlab: 💾 Run data saved at 
+runs/token_ar/behave/vq_canonical_100k_fid/swanlog/run-20261105_161146-kluu0xpr
+swanlab: 📁 View project at https://swanlab.cn/@qukehua/HOI
+swanlab: 🚀 View run vq_canonical_100k_fid at 
+https://swanlab.cn/@qukehua/HOI/runs/kluu0xpr
+{"step": 1, "modality_updates": {"human": 1, "object": 1, "contact": 1}, "human_loss": 2.2752468585968018, "human_reconstruction": 2.1671271324157715, "human_vq": 6.126482912804931e-05, "human_velocity": 0.2161167562007904, "human_perplexity": 409.6793212890625, "human_resets": 0.0, "human_root_deg": 64.50634765625, "human_body_deg": 19.024978637695312, "human_trans_cm": 42.33154296875, "human_joint_cm": 38.57765197753906, "object_loss": 2.4122602939605713, "object_reconstruction": 2.3428831100463867, "object_vq": 5.3472766012419015e-05, "object_velocity": 0.13864758610725403, "object_perplexity": 394.73992919921875, "object_resets": 2.0, "object_rot_deg": 104.78327941894531, "object_trans_cm": 61.68685531616211, "contact_loss": 0.6929197907447815, "contact_reconstruction": 0.692912757396698, "contact_vq": 7.02858551449026e-06, "contact_velocity": 0.0, "contact_perplexity": 360.5196838378906, "contact_resets": 0.0, "contact_f1": 0.12645967304706573}
+---- proc ----
+ 272722 /bin/bash -O extglob -c IFS= builtin read -r -d '' __cursor_command <&5 2>/dev/null || { builtin printf '%s\n' 'The command did not run: a shell startup file ($BASH_ENV or .zshenv) closed or replaced file descriptor 5, which carries the command. Run it again; this shell now passes commands as arguments.' >&2; builtin exit 126; }; exec 5<&-; builtin set -- "$__cursor_command"; builtin unset __cursor_command; snap=$(command cat <&3) && builtin shopt -s extglob && builtin eval -- "$snap"; { b
+… (output truncated)
+```
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+Training started successfully at step 1 on GPU 0.
+
+旧训练已暂停，此前运行至约15920步。best.pt恢复为第2000步，last.pt恢复为第14000步。
+
+指标已按图中要求调整：FID、R-precision Top-1/2/3、Diversity。VAE重建评估采用最低联合FID（human+object+contact），best.pt由该指标最优结果选出，与MotionGPT一致。
+
+VAE 日志将分别记录 human、object、contact 指标。Diversity 仅用于报告，不参与 checkpoint 选择；Contact BCE early-stop 已关闭。
+
+主模型 behave AR 配置验证生成 text-to-HOI（mode 111），best checkpoint 同样按最低联合 FID 选出，但尚未启动。
+
+新训练已开始：10 万步，canonical，body_weight 1，输出目录 runs/token_ar/behave/vq_canonical_100k_fid，GPU 0。step 1 确认完成，首次 FID 评估预计在 step 1000（约 20 分钟）。
+
+旧训练在 step 15920 被中断，step 16000 的 checkpoint 未能保存。step 15000 的文件虽已生成但未在目录中找到，仅残留 swanlog。
+
+主模型 AR 配置已调整，但 AR 训练尚未启动。当前 codec 路径仍指向旧的 4096 词表。
+
+联合 FID 作为单一指标汇总了 human、object、contact 三流信息，同时分别记录各流 FID、R-precision 和 Diversity 供表格填写。Diversity 仅用于报告真实多样性，不参与 best.pt 选择。SMPL 警告属正常现象
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+旧的 VAE 训练已停在大约第 15920 步。BEHAVE 的验证指标已改成图中的 FID、R-precision（Top-1/2/3）和 Diversity，新的 10 万步 VAE 已在 GPU 0 上跑起来。
+
+**选模规则。** `best.pt` 只看验证集重建 FID，越低越好，和 MotionGPT 一样。主指标用 joint 这一路：它同时看人体、物体和接触。human、object、contact 三路的 FID、R-precision 和 Diversity 也会一起记下。Diversity 对照真实动作的 Diversity，不拿来选模。
+
+**主模型。** BEHAVE 的三份 AR 配置（Qwen3.5-4B、Qwen3-4B、Qwen3-8B）在验证时改为：按文本生成完整人-物-接触动作，再用同一张表打分，并用最低 joint FID 选最优检查点。这次没有启动主模型训练，码本路径仍指向原来的 512×4096。
+
+**新的 VAE。** 输出目录是 `runs/token_ar/behave/vq_canonical_100k_fid`，水平锚点、身体旋转权重 1、码本 512×512 都保持不变。接触分支不再按 BCE 提前冻结，10 万步都参与训练。第 1 步已经打出来，第一次按 FID 存 `best.pt` 在第 1000 步。曲线在 https://swanlab.cn/@qukehua/HOI/runs/kluu0xpr 。
+
+停掉的那次训练，日志里最后一次完整保存是第 15000 步，但目录里当时只剩 SwanLab 日志。我把还在的副本放了回去：`best.pt` 是第 2000 步，`last.pt` 是第 14000 步。第 15000 步那个文件本身已经不在了。
+
+---
+
+_**User**_
+
+<timestamp>Thursday, Nov 5, 2026, 4:12 PM (UTC+8)</timestamp>
+<system_notification>
+The following task has finished. If you were already aware, ignore this notification and do not restate prior responses.
+
+<task>
+kind: shell
+status: error
+task_id: 667681
+title: Resume canonical VQ training from step 1000
+tool_call_id: call-6e8fb3ee-173c-4a08-95e2-08e27f140d51-99
+fc_daa037ac-1f1e-9f98-9cfd-e45424a3bf05_0
+detail: exit_code=143
+output_path: /root/.cursor/projects/share-personal-qukehua-HOI/terminals/667681.txt
+</task>
+</system_notification>
+<user_query>Briefly inform the user about the task result and perform any follow-up actions (if needed). If there's no follow-ups needed, don't explicitly say that.</user_query>
+
+---
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+The user wants me to briefly inform them about a task result.
+
+The shell task finished with exit code 143.
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+这是刚才主动停掉的旧训练，退出码 143 是预期结果。我确认一下新的 FID 训练还在跑。
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="shell" data-tool-name="run_terminal_command_v2"><details>
+<summary>Tool use: **run_terminal_command_v2** • Run command: pgrep -af &#39;vq_behave_canonical_100k_fid&#39; || echo &#39;fid-not-running&#39;; nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv,noheader; tail -n 3 /tmp/hoi_behave_vq_canonical_100k_fid.log</summary>
+```bash
+pgrep -af 'vq_behave_canonical_100k_fid' || echo 'fid-not-running'; nvidia-smi --query-gpu=index,memory.used,utilization.gpu --format=csv,noheader; tail -n 3 /tmp/hoi_behave_vq_canonical_100k_fid.log
+```
+
+```
+272726 .venv/bin/python -u -B -m unified_hoi.token_ar.train_codecs --config configs/token_ar/vq_behave_canonical_100k_fid.yaml
+0, 1984 MiB, 16 %
+1, 4 MiB, 0 %
+2, 4 MiB, 0 %
+3, 2558 MiB, 0 %
+https://swanlab.cn/@qukehua/HOI/runs/kluu0xpr
+{"step": 1, "modality_updates": {"human": 1, "object": 1, "contact": 1}, "human_loss": 2.2752468585968018, "human_reconstruction": 2.1671271324157715, "human_vq": 6.126482912804931e-05, "human_velocity": 0.2161167562007904, "human_perplexity": 409.6793212890625, "human_resets": 0.0, "human_root_deg": 64.50634765625, "human_body_deg": 19.024978637695312, "human_trans_cm": 42.33154296875, "human_joint_cm": 38.57765197753906, "object_loss": 2.4122602939605713, "object_reconstruction": 2.3428831100463867, "object_vq": 5.3472766012419015e-05, "object_velocity": 0.13864758610725403, "object_perplexity": 394.73992919921875, "object_resets": 2.0, "object_rot_deg": 104.78327941894531, "object_trans_cm": 61.68685531616211, "contact_loss": 0.6929197907447815, "contact_reconstruction": 0.692912757396698, "contact_vq": 7.02858551449026e-06, "contact_velocity": 0.0, "contact_perplexity": 360.5196838378906, "contact_resets": 0.0, "contact_f1": 0.12645967304706573}
+{"step": 20, "modality_updates": {"human": 20, "object": 20, "contact": 20}, "human_loss": 1.6792422533035278, "human_reconstruction": 1.5816532373428345, "human_vq": 0.00015435571549460292, "human_velocity": 0.19486930966377258, "human_perplexity": 99.70999145507812, "human_resets": 23.0, "human_root_deg": 36.56240463256836, "human_body_deg": 17.043121337890625, "human_trans_cm": 36.46778106689453, "human_joint_cm": 27.930496215820312, "object_loss": 1.291049838066101, "object_reconstruction": 1.2181963920593262, "object_vq": 0.0005194966797716916, "object_velocity": 0.14466777443885803, "object_perplexity": 85.67327880859375, "object_resets": 15.0, "object_rot_deg": 39.7275276184082, "object_trans_cm": 61.53824996948242, "contact_loss": 0.3686859905719757, "contact_reconstruction": 0.368
+… (output truncated)
+```
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+Brief update. The exit 143 is the old training we killed on purpose.
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+退出码 143 是旧的 VAE 训练被停掉时的正常结果，不是新任务报错。
+
+新的 10 万步训练已在 GPU 0 上运行，当前到第 20 步，三路码本都在更新。第一次按 FID 保存 `best.pt` 会在第 1000 步。
+
+---
+
+_**User**_
+
+<timestamp>Saturday, Nov 7, 2026, 2:12 AM (UTC+8)</timestamp>
+<system_notification>
+The following task has finished. If you were already aware, ignore this notification and do not restate prior responses.
+
+<task>
+kind: shell
+status: success
+task_id: 667682
+title: Start 100k FID-selected VQ training
+tool_call_id: call-89c3cba8-b0d1-46cd-865a-44a1fe05bdd1-66
+fc_d9751362-473e-9e84-b4ba-3a548992f259_0
+output_path: /root/.cursor/projects/share-personal-qukehua-HOI/terminals/667682.txt
+</task>
+</system_notification>
+<user_query>Briefly inform the user about the task result and perform any follow-up actions (if needed). If there's no follow-ups needed, don't explicitly say that.</user_query>
+
+---
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+The user wants me to briefly inform them about the task result.
+
+The 100k FID-selected VQ training shell task completed successfully.
+
+Checking the terminal output and training logs to verify whether the run completed 100k steps or simply exited.
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+100k 的 VAE 训练进程已经结束。我先看它是正常跑完，还是中途退出。
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="read" data-tool-name="read_file_v2"><details>
+<summary>Tool use: **read_file_v2** • Read file: /root/.cursor/projects/share-personal-qukehua-HOI/terminals/667682.txt</summary>
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="unknown" data-tool-name="ripgrep_raw_search"><details>
+<summary>Tool use: **ripgrep_raw_search**</summary>
+
+Parameters:
+
+```json
+{
+  "caseInsensitive": false,
+  "outputMode": "content",
+  "path": "/tmp/hoi_behave_vq_canonical_100k_fid.log",
+  "pattern": "\"step\": (1000|10000|50000|90000|100000)"
+}
+```
+Additional data:
+
+```json
+{
+  "isPruned": true,
+  "outputMode": "content",
+  "path": "/tmp/hoi_behave_vq_canonical_100k_fid.log",
+  "pattern": "\"step\": (1000|10000|50000|90000|100000)",
+  "topFiles": [
+    {
+      "matchCount": 10,
+      "uri": "/tmp/hoi_behave_vq_canonical_100k_fid.log"
+    }
+  ],
+  "totalFiles": 1,
+  "totalMatches": 10
+}
+```
+Status: **completed**
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+The training completed successfully at step 100000.
+
+The best selection FID is 0.2241.
+
+Searching for the best.pt checkpoint and the lowest FID.
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="unknown" data-tool-name="ripgrep_raw_search"><details>
+<summary>Tool use: **ripgrep_raw_search**</summary>
+
+Parameters:
+
+```json
+{
+  "caseInsensitive": false,
+  "outputMode": "content",
+  "path": "/tmp/hoi_behave_vq_canonical_100k_fid.log",
+  "pattern": "\"selection\": \"best.pt\""
+}
+```
+Additional data:
+
+```json
+{
+  "isPruned": true,
+  "outputMode": "content",
+  "path": "/tmp/hoi_behave_vq_canonical_100k_fid.log",
+  "pattern": "\"selection\": \"best.pt\"",
+  "topFiles": [
+    {
+      "matchCount": 19,
+      "uri": "/tmp/hoi_behave_vq_canonical_100k_fid.log"
+    }
+  ],
+  "totalFiles": 1,
+  "totalMatches": 19
+}
+```
+Status: **completed**
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+Need the last few best.pt selections to find the actual best step.
+
+The final best selection is 0.
+
+Fetching the remaining matches.
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+<tool-use data-tool-type="unknown" data-tool-name="ripgrep_raw_search"><details>
+<summary>Tool use: **ripgrep_raw_search**</summary>
+
+Parameters:
+
+```json
+{
+  "caseInsensitive": false,
+  "outputMode": "content",
+  "path": "/tmp/hoi_behave_vq_canonical_100k_fid.log",
+  "pattern": "\"selection\": \"best.pt\""
+}
+```
+Additional data:
+
+```json
+{
+  "isPruned": true,
+  "outputMode": "content",
+  "path": "/tmp/hoi_behave_vq_canonical_100k_fid.log",
+  "pattern": "\"selection\": \"best.pt\"",
+  "topFiles": [
+    {
+      "matchCount": 5,
+      "uri": "/tmp/hoi_behave_vq_canonical_100k_fid.log"
+    }
+  ],
+  "totalFiles": 1,
+  "totalMatches": 19
+}
+```
+Status: **completed**
+
+</details></tool-use>
+
+_**Agent (grok-4.7)**_
+
+<think><details><summary>Thought Process</summary>
+The training finished successfully.
+
+The best checkpoint is at step 80000 with joint FID 0.
+
+last.pt is at step 100000 with FID 0.24079. The run completed in about 34 hours. At the best checkpoint, R-precision was 0.169/0.261/0.337 and diversity was 1.379 versus 1.375 for real data.
+
+The best checkpoint also shows per-view FIDs of 0.321 for human, 0.180 for object, and 0.240 for contact. The new best joint FID of 0.224 is lower than the earlier run's best of 0
+</details></think>
+
+_**Agent (grok-4.7)**_
+
+10 万步 VAE 训练已经正常结束，退出码为 0，大约用了 34 小时。
+
+`best.pt` 是第 80000 步，按 joint FID 选出，FID 为 **0.224**。同一检查点上 R-precision Top-1/2/3 是 0.169 / 0.261 / 0.337，Diversity 是 1.379，真实动作是 1.375。三路 FID 分别是人体 0.321、物体 0.180、接触 0.240。
+
+第 100000 步的 `last.pt` joint FID 是 0.241，比 `best.pt` 略差。两次检查点都在 `runs/token_ar/behave/vq_canonical_100k_fid/`。

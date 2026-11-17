@@ -55,7 +55,13 @@ class TokenHOI(nn.Module):
             result[geometry_mask] = geometry.to(result.dtype).reshape(-1, result.shape[-1])
         return result
 
-    def forward(self, input_ids, attention_mask, object_bps, labels=None):
+    def forward(self, input_ids=None, attention_mask=None, object_bps=None, labels=None, *, generation=None):
+        # FSDP materializes root parameters only inside forward. Generation reads the
+        # embedding tables directly, so callers under FSDP pass them through here.
+        if generation is not None:
+            return self.generate_codes(*generation)
+        if input_ids is None or attention_mask is None:
+            raise ValueError("AR forward needs input_ids and attention_mask")
         output = self.backbone(inputs_embeds=self.embeddings(input_ids, object_bps),
                                attention_mask=attention_mask, use_cache=False, return_dict=True)
         hidden = output.last_hidden_state

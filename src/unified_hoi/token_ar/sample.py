@@ -32,7 +32,11 @@ def complete(model, codecs, builder, batch, mode, text=None, seed=42, temperatur
     example, order = builder.example(known, mode, prompt, n, float(batch["fps"][0]),
                                      "male" if batch["gender"][0] else "female", codecs.config.dataset,
                                      training=False, token_count=token_count)
-    generated = model.generate_codes(example["input_ids"], order, batch["object_bps"], seed, temperature, top_k)
+    request = (example["input_ids"], order, batch["object_bps"], seed, temperature, top_k)
+    # Root embeddings stay sharded until FSDP enters forward. A direct generate_codes
+    # call sees a 1-D flat shard and F.embedding rejects it.
+    generated = (model(generation=request) if hasattr(model, "_fsdp_wrapped_module")
+                 else model.generate_codes(*request))
     values = {}
     for k, bit in zip(MODALITIES, mode):
         values[k] = (codecs.models[k].decode(torch.tensor(generated[k], device=batch[k].device), n)

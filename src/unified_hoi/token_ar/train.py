@@ -17,6 +17,12 @@ from .codecs import load_codecs
 from .data import MotionDataset
 from .model import build_model
 from .sequence import SequenceBuilder, build_training_batch
+from .train_codecs import finish_swanlab, init_swanlab, log_swanlab
+
+_LOGGING = {
+    "use_swanlab", "swanlab_project", "swanlab_run_name", "swanlab_mode",
+    "swanlab_workspace", "swanlab_id", "swanlab_resume", "swanlab_api_key",
+}
 
 
 @torch.no_grad()
@@ -137,7 +143,7 @@ def run(config, resume=None):
         for key in ("codec_sha256", "manifest_sha256", "support_sha256", "num_processes"):
             if old[key] != metadata[key]:
                 raise ValueError(f"Resume changed {key}")
-        allowed_changes = {"max_steps", "output"}
+        allowed_changes = {"max_steps", "output", *_LOGGING}
         if ({k: v for k, v in old["config"].items() if k not in allowed_changes}
                 != {k: v for k, v in config.items() if k not in allowed_changes}):
             raise ValueError("Resume changed AR training semantics")
@@ -153,78 +159,95 @@ def run(config, resume=None):
     else:
         step, epoch, skip, best = 0, 0, 0, float("inf")
         set_seed(config.get("seed", 42), device_specific=True)
+    swan = None
     if accelerator.is_main_process:
         output.mkdir(parents=True, exist_ok=True)
         write_json(output / "config.json", config)
         write_json(output / "run_info.json", metadata)
+        swan = init_swanlab(config, output)
     accelerator.wait_for_everyone()
     optimizer.zero_grad(set_to_none=True)
-    while step < config["max_steps"]:
-        generator.manual_seed(config.get("seed", 42) + epoch)
-        if hasattr(loader, "set_epoch"):
-            loader.set_epoch(epoch)
-        active = accelerator.skip_first_batches(loader, skip) if skip else loader
-        for index, batch in enumerate(active, start=skip):
-            model.train()
-            with accelerator.accumulate(model):
-                batch = move_batch(batch, accelerator.device)
-                selected = [modes[int(torch.randint(len(modes), ()))] for _ in batch["human"]]
-                packed = build_training_batch(batch, codecs, builder, selected, config.get("text_dropout", .1))
-                with accelerator.autocast():
-                    result = model(**packed, object_bps=batch["object_bps"])
-                global_count = accelerator.reduce(result["token_count"].detach(), reduction="sum")
-                loss = result["loss_sum"] * accelerator.num_processes / global_count
-                if not torch.isfinite(loss):
-                    raise FloatingPointError("Non-finite AR loss")
-                accelerator.backward(loss)
-                if accelerator.sync_gradients:
-                    accelerator.clip_grad_norm_(model.parameters(), config.get("gradient_clip", 1.))
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)
-            if not accelerator.sync_gradients:
-                continue
-            step += 1
-            if step % config.get("log_every", 20) == 0 or step == 1:
-                logged_loss = accelerator.reduce(result["loss_sum"].detach(), reduction="sum") / global_count
-                accelerator.print(json.dumps({"step": step, "token_ce": float(logged_loss)}), flush=True)
-            if step % config.get("validate_every", 1000) == 0 or step == config["max_steps"]:
-                if fid_selection:
-                    score, details = validate_figure(model, codecs, builder, fid_data, evaluator, config, accelerator)
-                else:
-                    score, details = validate(model, codecs, builder, val, config, accelerator)
-                improved = score < best
-                best = min(best, score)
-                destination = output / f"checkpoint-{step:07d}"
-                if destination.exists():
-                    raise FileExistsError(destination)
-                # All ranks must finish the existence check before any rank creates the directory.
-                accelerator.wait_for_everyone()
-                accelerator.save_state(str(destination), safe_serialization=True)
-                if accelerator.is_main_process:
-                    tokenizer.save_pretrained(destination / "tokenizer")
-                    shutil.copyfile(config["codecs"], destination / "codecs.pt")
-                    write_json(destination / "metadata.json", {**metadata, "step": step, "epoch": epoch,
-                                                               "next_batch": index + 1, "best_val": best,
-                                                               "validation": details})
-                    (destination / "COMPLETE").write_text(ARCHITECTURE, encoding="utf-8")
-                    write_json(output / "last.json", {"checkpoint": destination.name, "step": step})
-                    if improved:
-                        write_json(output / "best.json", {"checkpoint": destination.name, "step": step, "score": score})
-                accelerator.wait_for_everyone()
-                if fid_selection:
-                    accelerator.print(json.dumps({"step": step, "FID": details["FID"],
-                                                  "R_Precision": details["R_Precision"],
-                                                  "Diversity": details["Diversity"],
-                                                  "Diversity_real": details["Diversity_real"],
-                                                  "view": details["view"],
-                                                  "views": {name: {key: item[key] for key in
-                                                                   ("FID", "R_Precision", "Diversity", "Diversity_real")}
-                                                            for name, item in details["views"].items()}}), flush=True)
-                else:
-                    accelerator.print(json.dumps({"step": step, "val_token_ce": score, "modes": details}), flush=True)
-            if step >= config["max_steps"]:
-                break
-        epoch, skip = epoch + 1, 0
+    try:
+        while step < config["max_steps"]:
+            generator.manual_seed(config.get("seed", 42) + epoch)
+            if hasattr(loader, "set_epoch"):
+                loader.set_epoch(epoch)
+            active = accelerator.skip_first_batches(loader, skip) if skip else loader
+            for index, batch in enumerate(active, start=skip):
+                model.train()
+                with accelerator.accumulate(model):
+                    batch = move_batch(batch, accelerator.device)
+                    selected = [modes[int(torch.randint(len(modes), ()))] for _ in batch["human"]]
+                    packed = build_training_batch(batch, codecs, builder, selected, config.get("text_dropout", .1))
+                    with accelerator.autocast():
+                        result = model(**packed, object_bps=batch["object_bps"])
+                    global_count = accelerator.reduce(result["token_count"].detach(), reduction="sum")
+                    loss = result["loss_sum"] * accelerator.num_processes / global_count
+                    if not torch.isfinite(loss):
+                        raise FloatingPointError("Non-finite AR loss")
+                    accelerator.backward(loss)
+                    if accelerator.sync_gradients:
+                        accelerator.clip_grad_norm_(model.parameters(), config.get("gradient_clip", 1.))
+                    optimizer.step()
+                    optimizer.zero_grad(set_to_none=True)
+                if not accelerator.sync_gradients:
+                    continue
+                step += 1
+                if step % config.get("log_every", 20) == 0 or step == 1:
+                    logged_loss = accelerator.reduce(result["loss_sum"].detach(), reduction="sum") / global_count
+                    token_ce = float(logged_loss)
+                    accelerator.print(json.dumps({"step": step, "token_ce": token_ce}), flush=True)
+                    log_swanlab(swan, {"train/token_ce": token_ce}, step)
+                if step % config.get("validate_every", 1000) == 0 or step == config["max_steps"]:
+                    if fid_selection:
+                        score, details = validate_figure(model, codecs, builder, fid_data, evaluator, config, accelerator)
+                    else:
+                        score, details = validate(model, codecs, builder, val, config, accelerator)
+                    improved = score < best
+                    best = min(best, score)
+                    destination = output / f"checkpoint-{step:07d}"
+                    if destination.exists():
+                        raise FileExistsError(destination)
+                    # All ranks must finish the existence check before any rank creates the directory.
+                    accelerator.wait_for_everyone()
+                    accelerator.save_state(str(destination), safe_serialization=True)
+                    if accelerator.is_main_process:
+                        tokenizer.save_pretrained(destination / "tokenizer")
+                        shutil.copyfile(config["codecs"], destination / "codecs.pt")
+                        write_json(destination / "metadata.json", {**metadata, "step": step, "epoch": epoch,
+                                                                   "next_batch": index + 1, "best_val": best,
+                                                                   "validation": details})
+                        (destination / "COMPLETE").write_text(ARCHITECTURE, encoding="utf-8")
+                        write_json(output / "last.json", {"checkpoint": destination.name, "step": step})
+                        if improved:
+                            write_json(output / "best.json", {"checkpoint": destination.name, "step": step,
+                                                              "score": score})
+                    accelerator.wait_for_everyone()
+                    if fid_selection:
+                        accelerator.print(json.dumps({"step": step, "FID": details["FID"],
+                                                      "R_Precision": details["R_Precision"],
+                                                      "Diversity": details["Diversity"],
+                                                      "Diversity_real": details["Diversity_real"],
+                                                      "view": details["view"],
+                                                      "views": {name: {key: item[key] for key in
+                                                                       ("FID", "R_Precision", "Diversity",
+                                                                        "Diversity_real")}
+                                                                for name, item in details["views"].items()}}),
+                                          flush=True)
+                        log_swanlab(swan, {"val/FID": details["FID"], "val/R_Precision": details["R_Precision"],
+                                           "val/Diversity": details["Diversity"],
+                                           "val/Diversity_real": details["Diversity_real"],
+                                           "val/best": best}, step)
+                    else:
+                        accelerator.print(json.dumps({"step": step, "val_token_ce": score, "modes": details}),
+                                          flush=True)
+                        log_swanlab(swan, {"val/token_ce": score, "val/best": best,
+                                           **{f"val/{mode}": value for mode, value in details.items()}}, step)
+                if step >= config["max_steps"]:
+                    break
+            epoch, skip = epoch + 1, 0
+    finally:
+        finish_swanlab(swan)
     accelerator.end_training()
     return {"output": str(output), "step": step}
 

@@ -47,10 +47,33 @@ def collect_split_features(dataset, kind, geometry, target_fps, coordinate_frame
     return np.concatenate(rows, 0), fingerprint(sorted(frame_ids))
 
 
+def motion_text_table(evaluator, dataset, predictions, device, seed, view):
+    """FID, R-precision Top-1/2/3 and Diversity for text-driven generations."""
+    from .evaluate_motion_text import figure_table, score_motion_pairs
+    generated = {}
+    for key, predicted in predictions:
+        if key in generated:
+            raise ValueError(f"Duplicate motion-text window {key}")
+        generated[key] = predicted
+    pairs = []
+    loader = DataLoader(dataset, batch_sampler=[[i] for i in range(len(dataset))],
+                        generator=torch.Generator().manual_seed(0))
+    for batch in loader:
+        key = (batch["sequence_id"][0], int(batch["window_start"]))
+        predicted = generated.get(key)
+        if predicted is not None:
+            pairs.append((batch, predicted))
+    if len(pairs) < 2:
+        raise ValueError("FID / R-precision needs at least two captioned generated windows")
+    table = figure_table(score_motion_pairs(evaluator, pairs, device, seed=seed), view)
+    table["evaluated_windows"] = len(pairs)
+    return table
+
+
 def benchmark(checkpoint, output, *, modes=MODES, split="val", seed=42, temperature=0., top_k=50,
               text_conditioned=True, limit=None, device="cpu", dtype="bfloat16", profile="tridi",
               eval_fps=None, train_reference_fps=None, generation_frame="pelvis",
-              body_models="data/smplx_models", refiner=None):
+              body_models="data/smplx_models", refiner=None, motion_text_evaluator=None):
     if (not modes or any(m not in MODES for m in modes) or len(set(modes)) != len(modes)
             or split not in ("val", "test") or (limit is not None and limit < 1)):
         raise ValueError("Specify distinct H/O/C modes, a val/test split and a positive limit")
@@ -72,10 +95,23 @@ def benchmark(checkpoint, output, *, modes=MODES, split="val", seed=42, temperat
     dataset = MotionDataset(config["manifest"], split, config["dataset"], geometry.support_hash, window)
     if not len(dataset):
         raise ValueError("No evaluation windows")
+    evaluator_model, text_dataset, figure_view = None, None, config.get("fid_view", "joint")
+    if motion_text_evaluator:
+        from .motion_text import VIEWS, EvaluatorDataset, load_evaluator
+        if "111" not in modes or not text_conditioned:
+            raise ValueError("FID / R-precision / Diversity require text-conditioned mode 111")
+        if figure_view not in VIEWS or (limit is not None and limit < 2):
+            raise ValueError("Motion-text table needs a known fid_view and at least two windows")
+        evaluator_path = Path(motion_text_evaluator)
+        if not evaluator_path.is_file():
+            raise FileNotFoundError(f"Motion-text evaluator not found: {evaluator_path}")
+        text_dataset = EvaluatorDataset(config["manifest"], split, config["dataset"], geometry.support_hash, window)
+        evaluator_model, _ = load_evaluator(evaluator_path, config["dataset"], geometry.support_hash,
+                                            text_dataset.records, device)
     plan = frame_plan(dataset.records, protocol["eval_fps"])
     output.mkdir(parents=True)
     reports, bags, ids, meshes = {}, {}, [], {}
-    coarse_reports = {}
+    coarse_reports, figure_predictions = {}, []
     reference_digest = hashlib.sha256()
     total = len(dataset) if limit is None else min(limit, len(dataset))
     for index in range(total):
@@ -118,6 +154,11 @@ def benchmark(checkpoint, output, *, modes=MODES, split="val", seed=42, temperat
                                             torch.tensor(vertices, device=device, dtype=torch.float32))
             states = {key: values[key][None] for key in ("human", "object", "contact")}
             report = reconstruction(states, target, geometry, mode, vertices, ProbabilityDecoder(), .5, selected)
+            if evaluator_model is not None and mode == "111":
+                predicted = {k: values[k].detach().to("cpu")[None] for k in MODALITIES}
+                predicted.update(valid_frames=torch.ones(1, values["human"].shape[0], dtype=torch.bool),
+                                 fps=batch["fps"].detach().to("cpu"))
+                figure_predictions.append(((batch["sequence_id"][0], start), predicted))
             report.update(mode=mode, mode_description=MODE_DESCRIPTIONS[mode], sequence_id=entry["sequence_id"],
                           window_start=start, input_frames=n, selected_local_indices=selected.tolist())
             if coarse_report is not None:
@@ -173,6 +214,15 @@ def benchmark(checkpoint, output, *, modes=MODES, split="val", seed=42, temperat
         summary["generation"][mode] = scores
         print(f"mode {mode} ({MODE_DESCRIPTIONS[mode]}): 1-NNA={scores['1-NNA']:.4f} "
               f"COV={scores['COV']:.4f} MMD={scores['MMD']:.4f}", flush=True)
+    if evaluator_model is not None:
+        table = motion_text_table(evaluator_model, text_dataset, figure_predictions, device, seed, figure_view)
+        summary["motion_text"] = table
+        summary["motion_text_evaluator"] = str(motion_text_evaluator)
+        precision = table["R_Precision"]
+        print(f"text-driven {table['view']}: FID={table['FID']:.4f} "
+              f"R-Precision top1={precision['top1']:.4f} top2={precision['top2']:.4f} "
+              f"top3={precision['top3']:.4f} Diversity={table['Diversity']:.4f} "
+              f"(GT {table['Diversity_real']:.4f})", flush=True)
     write_json(output / "summary.json", summary)
     return summary
 
@@ -192,10 +242,16 @@ def main():
     parser.add_argument("--dtype", choices=("float32", "bfloat16", "float16"), default="bfloat16")
     parser.add_argument("--body-models", default="data/smplx_models")
     parser.add_argument("--refiner", help="Optional continuous refiner; also reports paired coarse reconstruction")
+    parser.add_argument("--motion-text-evaluator",
+                        help="Frozen evaluator last.pt. Adds FID, R-precision Top-1/2/3 and Diversity for mode 111")
     args = vars(parser.parse_args())
     torch.set_num_threads(4)
     summary = benchmark(**args)
-    print(json.dumps({"output": args["output"], "reconstruction": summary["reconstruction"]}))
+    printed = {"output": args["output"], "reconstruction": summary["reconstruction"]}
+    if "motion_text" in summary:
+        printed["motion_text"] = {key: summary["motion_text"][key] for key in
+                                   ("view", "FID", "R_Precision", "Diversity", "Diversity_real", "evaluated_windows")}
+    print(json.dumps(printed))
 
 
 if __name__ == "__main__":

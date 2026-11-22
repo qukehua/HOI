@@ -27,10 +27,12 @@ python -m unified_hoi.token_ar.evaluate_codecs \
 # 第二阶段：Qwen3.5-4B 四卡全参数
 accelerate launch --config_file configs/token_ar/accelerate_qwen35_4gpu.yaml \
   --module unified_hoi.token_ar.train --config configs/token_ar/qwen35_4b_behave.yaml
-# 评估 BEHAVE test（40000步；tridi_metrics_v2：重建指标 + 1-NNA/COV/MMD/SD）
-# 在项目根目录运行。输出目录必须不存在；结果在 summary.json。
+# 评估 BEHAVE test（40000步）
+# 重建指标 + 1-NNA/COV/MMD/SD，以及文本驱动 111 的 FID / R-precision Top-1/2/3 / Diversity。
+# 在项目根目录运行。输出目录必须不存在；结果在 summary.json 的 reconstruction 和 motion_text。
 PYTHONPATH=src python -m unified_hoi.token_ar.benchmark \
   --checkpoint runs/token_ar/behave/behave/checkpoint-0040000 \
+  --motion-text-evaluator runs/token_ar/behave/motion_text_evaluator/last.pt \
   --split test --modes 100 010 001 111 --temperature 0 \
   --device cuda:0 --dtype bfloat16 \
   --output runs/eval_behave_step40000

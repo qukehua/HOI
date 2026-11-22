@@ -6,8 +6,9 @@ import numpy as np
 
 VERSION = "tridi_metrics_v2"
 MODE_DESCRIPTIONS = {
-    "010": "O|H,C", "100": "H|O,C", "001": "C|H,O",
-    "011": "O,C|H", "101": "H,C|O", "110": "H,O|C", "111": "H,O,C",
+    "111": "text_to_hoi H,O,C",
+    "101": "object_to_human H,C|O",
+    "011": "human_to_object O,C|H",
 }
 
 

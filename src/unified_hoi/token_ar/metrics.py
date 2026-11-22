@@ -28,6 +28,28 @@ def similarity(source, target):
 
 
 
+def world_joint_errors(pred, target):
+    """Object-to-human joint errors in world metres, not pelvis-relative.
+
+    The 73-joint layout is 22 body joints, 30 hand joints, then 21 landmarks.
+    Wrists are body joints 20 and 21 and are included in HandJPE.
+    """
+    pred, target = np.asarray(pred, np.float64), np.asarray(target, np.float64)
+    if (pred.ndim != 3 or pred.shape != target.shape or pred.shape[-2:] != (73, 3)
+            or not np.isfinite(pred).all() or not np.isfinite(target).all()):
+        raise ValueError("Expected finite joints [T,73,3]")
+    delta = np.linalg.norm(pred - target, axis=-1)
+    return {"HandJPE": float(delta[:, 20:52].mean()), "MPJPE_BODY": float(delta[:, :22].mean())}
+
+
+def contact_frame_ratio(mask):
+    """Fraction of frames in which any contact vertex meets the distance test."""
+    mask = np.asarray(mask, bool)
+    if mask.ndim != 2 or mask.shape[0] == 0 or mask.shape[1] == 0:
+        raise ValueError("Contact mask must be [frames, vertices]")
+    return float(mask.any(axis=1).mean())
+
+
 def contact_scores(pred, target):
     pred, target = np.asarray(pred, bool), np.asarray(target, bool)
     if pred.shape != target.shape or not pred.size:
@@ -124,8 +146,8 @@ def mesh_contacts(body_vertices, object_pose, object_vertices):
 
 @torch.no_grad()
 def reconstruction(states, batch, geometry, mode, vertices, codec=None, threshold=.5, frame_indices=None):
-    if mode not in ("100", "010", "001", "110", "101", "011", "111"):
-        raise ValueError("Invalid generated-bit evaluation mode")
+    if not (isinstance(mode, str) and len(mode) == 3 and set(mode) <= {"0", "1"}):
+        raise ValueError("Expected an H/O/C bit mask")
     for key, bit in zip(("human", "object"), mode):
         if bit == "0" and not torch.allclose(states[key], batch[key], atol=1e-5, rtol=0):
             raise ValueError(f"Observed {key} was altered before evaluation")
@@ -151,6 +173,9 @@ def reconstruction(states, batch, geometry, mode, vertices, codec=None, threshol
         contact = mesh_contacts(pv, po, vertices)
         details["SBJ_CONTACT"] = contact_scores(contact, gt_contact)
         scores["SBJ_CONTACT_MESHES"] = details["SBJ_CONTACT"]["accuracy_percent"]
+        scores.update(world_joint_errors(pj, gj))
+        scores["c_percent"] = contact_frame_ratio(contact)
+        scores["c_percent_real"] = contact_frame_ratio(gt_contact)
     if mode[1] == "1":
         rp, rg = rotation_matrices(po), rotation_matrices(go)
         # Bound full-object vertex memory even for high-resolution OMOMO templates.

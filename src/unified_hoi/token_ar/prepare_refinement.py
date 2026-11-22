@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader
 
 from ..runtime import move_batch, write_json
 from . import MODALITIES, MODES
+from .tasks import TASK_MODES
 from .body import BodyGeometry, digest_file
 from .checkpoint import load_run
 from .codecs import load_codecs
@@ -18,9 +19,11 @@ from .sample import complete
 CACHE_KIND = "token_ar_refinement_cache_v1"
 
 
-def prepare(checkpoint, output, device="cuda:0", dtype="bfloat16", modes=MODES,
+def prepare(checkpoint, output, device="cuda:0", dtype="bfloat16", modes=None,
             temperature=0., top_k=50, text_conditioned=True, seed=42, limit=None,
             body_models="data/smplx_models", resume=False):
+    if modes is None:
+        modes = TASK_MODES
     if not modes or len(set(modes)) != len(modes) or any(m not in MODES for m in modes):
         raise ValueError("Specify distinct H/O/C modes")
     if limit is not None and limit < 1:
@@ -114,7 +117,8 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--dtype", choices=("float32", "bfloat16", "float16"), default="bfloat16")
-    parser.add_argument("--modes", nargs="+", choices=MODES, default=list(MODES))
+    parser.add_argument("--modes", nargs="+", choices=MODES, default=None,
+                        help="Default: 111, 101 and 011")
     parser.add_argument("--temperature", type=float, default=0.)
     parser.add_argument("--top-k", type=int, default=50)
     parser.add_argument("--no-text", dest="text_conditioned", action="store_false")

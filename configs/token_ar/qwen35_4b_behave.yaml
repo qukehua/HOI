@@ -6,7 +6,7 @@ seed: 42
 cpu_threads: 4
 window: 120
 stride: 60
-output: runs/token_ar/behave/qwen35_4b_full_vq_canonical_fid
+output: runs/token_ar/behave/qwen35_4b_tasks3_fid
 # Canonical 512x512 VQ selected by the lowest validation joint FID. A changed codebook cannot resume an old AR run.
 codecs: runs/token_ar/behave/vq_canonical_100k_fid/best.pt
 backbone: Qwen/Qwen3.5-4B-Base
@@ -23,15 +23,13 @@ gradient_clip: 1.0
 geometry_tokens: 8
 max_text_tokens: 128
 max_sequence_tokens: 512
+# 111 text-to-HOI, 101 object-to-human, 011 human-to-object.
 allowed_modes:
-- '100'
-- '010'
-- '001'
-- '110'
+- '111'
 - '101'
 - '011'
-- '111'
-text_dropout: 0.1
+# Dropout applies only to object-to-human, so that task sees both text settings.
+text_dropout: 0.5
 validate_every: 1000
 validation_batches: 8
 validation_text_condition: true

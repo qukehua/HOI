@@ -1,4 +1,4 @@
-"""One masked multi-task AR model; full/partial backbone tuning without per-task LoRA."""
+"""One AR model for text-to-HOI, object-to-human and human-to-object; no per-task LoRA."""
 import argparse
 from dataclasses import asdict
 import json
@@ -10,13 +10,15 @@ from torch.utils.data import DataLoader
 import yaml
 
 from ..runtime import move_batch, write_json
-from . import ARCHITECTURE, MODALITIES, MODES
+from . import ARCHITECTURE, MODALITIES
 from .body import digest_file
 from .checkpoint import read_metadata
 from .codecs import load_codecs
 from .data import MotionDataset
 from .model import build_model
 from .sequence import SequenceBuilder, build_training_batch
+from .tasks import (TASK_MODES, choose_mode, condition_key, require_task_modes, task_mean,
+                    validation_conditions)
 from .train_codecs import finish_swanlab, init_swanlab, log_swanlab
 
 _LOGGING = {
@@ -25,29 +27,62 @@ _LOGGING = {
 }
 
 
+def take_batch(batch, indices):
+    if not indices:
+        raise ValueError("Empty batch subset")
+    index = list(indices)
+    subset = {}
+    for key, value in batch.items():
+        if torch.is_tensor(value):
+            subset[key] = value[index]
+        elif isinstance(value, (list, tuple)):
+            subset[key] = [value[i] for i in index]
+        else:
+            subset[key] = value
+    return subset
+
+
 @torch.no_grad()
-def validate(model, codecs, builder, dataset, config, accelerator):
+def validate(model, codecs, builder, dataset, config, accelerator, modes):
     model.eval()
     loader = DataLoader(dataset, batch_size=config.get("batch_size", 1), shuffle=False, num_workers=0,
                         generator=torch.Generator().manual_seed(config.get("seed", 42)))
     # Identical fixed validation windows on all ranks keep FSDP forward collectives aligned.
-    sums = {mode: [0., 0] for mode in MODES}
+    conditions = validation_conditions(modes)
+    sums = {condition_key(mode, condition): [0., 0] for mode, condition in conditions}
     for index, batch in enumerate(loader):
         if index >= config.get("validation_batches", 8):
             break
         batch = move_batch(batch, accelerator.device)
-        if not config.get("validation_text_condition", True):
-            batch["text"] = [""] * len(batch["text"])
-        for mode in MODES:
-            packed = build_training_batch(batch, codecs, builder, [mode] * len(batch["human"]))
+        for mode, condition in conditions:
+            texts = ["" if condition == "without_text" else text for text in batch["text"]]
+            chosen = list(range(len(texts)))
+            if mode == "111":
+                chosen = [i for i, text in enumerate(texts) if str(text).strip()]
+                if not chosen:
+                    continue
+            part = take_batch(batch, chosen)
+            packed = build_training_batch(part, codecs, builder, [mode] * len(chosen),
+                                          texts=[texts[i] for i in chosen])
             with accelerator.autocast():
-                result = model(**packed, object_bps=batch["object_bps"])
-            sums[mode][0] += float(result["loss_sum"])
-            sums[mode][1] += int(result["token_count"])
-    if any(count == 0 for _, count in sums.values()):
-        raise ValueError("Empty validation set")
-    scores = {mode: loss / count for mode, (loss, count) in sums.items()}
-    return sum(scores.values()) / len(scores), scores
+                result = model(**packed, object_bps=part["object_bps"])
+            key = condition_key(mode, condition)
+            sums[key][0] += float(result["loss_sum"])
+            sums[key][1] += int(result["token_count"])
+    scores = {}
+    for key, (loss, count) in sums.items():
+        if count:
+            scores[key] = loss / count
+        elif not key.startswith("object_to_human.with_text") and key != "text_to_hoi.with_text":
+            raise ValueError(f"Validation condition {key} saw no tokens")
+    if "text_to_hoi.with_text" not in scores:
+        raise ValueError("Text-to-HOI validation needs captioned windows")
+    if not any(key.startswith("object_to_human.") for key in scores):
+        raise ValueError("Object-to-human validation saw no tokens")
+    mean, per_task = task_mean(scores)
+    details = dict(scores)
+    details.update({f"task.{name}": value for name, value in per_task.items()})
+    return mean, details
 
 
 @torch.no_grad()
@@ -78,9 +113,12 @@ def run(config, resume=None):
     from accelerate.utils import GradientAccumulationPlugin, set_seed
     if config.get("architecture") != ARCHITECTURE:
         raise ValueError("Use a token_ar training configuration")
-    modes = config.get("allowed_modes", list(MODES))
-    if not modes or any(mode not in MODES for mode in modes) or len(set(modes)) != len(modes):
-        raise ValueError("Invalid H/O/C masks")
+    modes = require_task_modes(config.get("allowed_modes", list(TASK_MODES)))
+    dropout = float(config.get("text_dropout", 0.5))
+    if not 0 <= dropout <= 1:
+        raise ValueError("text_dropout must be in [0, 1]")
+    if config.get("validation_text_condition", True) is False:
+        raise ValueError("Text conditions belong to each task and cannot be blanked globally")
     if min(config["max_steps"], config.get("batch_size", 1), config.get("validation_batches", 8)) < 1:
         raise ValueError("Training and validation budgets must be positive")
     output = Path(config["output"])
@@ -137,7 +175,7 @@ def run(config, resume=None):
                 "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
                 "selection_metric": ("lowest_validation_fid_rprecision_diversity"
                                     if fid_selection else
-                                    "mean_of_seven_teacher_forced_validation_token_cross_entropies"),
+                                    "mean_of_three_task_teacher_forced_token_cross_entropies"),
                 "num_processes": accelerator.num_processes}
     if old:
         for key in ("codec_sha256", "manifest_sha256", "support_sha256", "num_processes"):
@@ -177,8 +215,8 @@ def run(config, resume=None):
                 model.train()
                 with accelerator.accumulate(model):
                     batch = move_batch(batch, accelerator.device)
-                    selected = [modes[int(torch.randint(len(modes), ()))] for _ in batch["human"]]
-                    packed = build_training_batch(batch, codecs, builder, selected, config.get("text_dropout", .1))
+                    selected = [choose_mode(modes, text) for text in batch["text"]]
+                    packed = build_training_batch(batch, codecs, builder, selected, dropout)
                     with accelerator.autocast():
                         result = model(**packed, object_bps=batch["object_bps"])
                     global_count = accelerator.reduce(result["token_count"].detach(), reduction="sum")
@@ -202,7 +240,7 @@ def run(config, resume=None):
                     if fid_selection:
                         score, details = validate_figure(model, codecs, builder, fid_data, evaluator, config, accelerator)
                     else:
-                        score, details = validate(model, codecs, builder, val, config, accelerator)
+                        score, details = validate(model, codecs, builder, val, config, accelerator, modes)
                     improved = score < best
                     best = min(best, score)
                     destination = output / f"checkpoint-{step:07d}"
@@ -239,7 +277,7 @@ def run(config, resume=None):
                                            "val/Diversity_real": details["Diversity_real"],
                                            "val/best": best}, step)
                     else:
-                        accelerator.print(json.dumps({"step": step, "val_token_ce": score, "modes": details}),
+                        accelerator.print(json.dumps({"step": step, "val_token_ce": score, "conditions": details}),
                                           flush=True)
                         log_swanlab(swan, {"val/token_ce": score, "val/best": best,
                                            **{f"val/{mode}": value for mode, value in details.items()}}, step)

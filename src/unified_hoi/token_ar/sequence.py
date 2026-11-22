@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import torch
 
 from . import MODALITIES, MODES
+from .tasks import condition_text
 
 
 @dataclass(frozen=True)
@@ -19,7 +20,11 @@ class Vocabulary:
     missing: int = 5
     modality_start: int = 6
     mode_start: int = 9
-    code_start: int = 16
+
+    @property
+    def code_start(self):
+        """Motion codes follow the three task tokens, with no unused mask slots."""
+        return self.mode_start + len(MODES)
 
     @property
     def size(self):
@@ -39,7 +44,7 @@ class SequenceBuilder:
 
     def prefix(self, codes, mode, text, frames, fps, gender, dataset):
         if mode not in MODES:
-            raise ValueError("Expected seven whole-modality H/O/C masks; 1=generate, 0=observed")
+            raise ValueError("Expected a whole-modality H/O/C mask; 1=generate, 0=observed")
         v = self.vocab
         header = f"Dataset: {dataset}; frames: {frames}; fps: {fps:g}; gender: {gender}. Text: {text}"
         words = self.tokenizer.encode(header, add_special_tokens=False, truncation=True,
@@ -97,12 +102,14 @@ class SequenceBuilder:
         return {"input_ids": ids, "labels": labels, "attention_mask": attention}
 
 
-def build_training_batch(batch, codecs, builder, modes=None, text_dropout=0.):
+def build_training_batch(batch, codecs, builder, modes=None, text_dropout=0., texts=None):
     encoded = codecs.encode(batch)
     examples = []
+    if texts is not None and len(texts) != len(batch["human"]):
+        raise ValueError("Text override must match the batch")
     for i in range(len(batch["human"])):
         mode = modes[i] if modes is not None else MODES[int(torch.randint(len(MODES), ()))]
-        text = batch["text"][i] if torch.rand(()) >= text_dropout else ""
+        text = texts[i] if texts is not None else condition_text(mode, batch["text"][i], text_dropout)
         codes = {k: encoded[k][i].tolist() for k in MODALITIES}
         example, _ = builder.example(codes, mode, text, int(batch["valid_frames"][i].sum()),
                                      float(batch["fps"][i]), "male" if batch["gender"][i] else "female",

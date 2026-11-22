@@ -52,7 +52,7 @@ PYTHONPATH=src python -m unified_hoi.token_ar.benchmark \
 
 - `src/unified_hoi/token_ar/`：VQ-VAE、AR 模型、训练、采样、单条复评（`evaluate`）和批量基准（`benchmark`）。
 - `src/unified_hoi/`：token_ar 复用的清单读取、旋转、网格 BPS、SMPL 网格解码/导出和运行工具。
-- `configs/token_ar/`：VQ、Qwen3.5-4B 正式配置、Qwen3-4B/8B 对照配置及四卡 accelerate 配置。
+- `configs/token_ar/`：VQ、Qwen3.5-4B 正式配置及四卡 accelerate 配置。
 - `docs/TOKEN_AR.md`：训练、推理和评估说明；`docs/TOKEN_AR_ORIGIN.json`：复制来源记录。
 
 整个 `external/` 及原始 `OMOMO/` 受保护，不参与清理。

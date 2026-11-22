@@ -10,6 +10,7 @@ from ..data import read_manifest
 from ..mesh_geometry import load_mesh_asset
 from ..runtime import move_batch
 from . import ARCHITECTURE, MODALITIES, MODES
+from .tasks import TASKS
 from .body import BodyGeometry, digest_file, standard_parameters
 from .checkpoint import load_run
 from .canonical import restore_scene
@@ -134,7 +135,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("checkpoint", "manifest", "reference", "output"):
         parser.add_argument("--" + name, required=True)
-    parser.add_argument("--mode", required=True, choices=MODES)
+    parser.add_argument("--mode", choices=MODES)
+    parser.add_argument("--task", choices=tuple(TASKS),
+                        help="text_to_hoi, object_to_human or human_to_object")
     parser.add_argument("--frames", type=int, default=120)
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
@@ -148,7 +151,21 @@ def main():
     parser.add_argument("--body-models", default="data/smplx_models")
     parser.add_argument("--refiner", help="Optional trained continuous refiner best.pt")
     torch.set_num_threads(4)
-    print(sample(**vars(parser.parse_args())))
+    args = parser.parse_args()
+    if args.task and args.mode and TASKS[args.task] != args.mode:
+        parser.error("--task and --mode disagree")
+    if not args.task and not args.mode:
+        parser.error("Specify --task or --mode")
+    if args.task:
+        args.mode = TASKS[args.task]
+        if args.task == "human_to_object":
+            if args.text or args.text_conditioned:
+                parser.error("human-to-object does not use text")
+            args.text = ""
+        elif args.task == "text_to_hoi" and args.text is None:
+            args.text_conditioned = True
+    delattr(args, "task")
+    print(sample(**vars(args)))
 
 
 if __name__ == "__main__":

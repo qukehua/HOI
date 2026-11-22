@@ -101,7 +101,7 @@ class TemporalBlock(nn.Module):
 
 
 class ContinuousRefiner(nn.Module):
-    """One unpadded window; same parameters serve all seven generated-bit masks."""
+    """One unpadded window; the same parameters serve the three HOI tasks."""
     def __init__(self, config):
         super().__init__()
         self.config = config

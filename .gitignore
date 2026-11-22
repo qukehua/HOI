@@ -1,6 +1,6 @@
 .venv/
-external/
 data/
+datasets/
 OMOMO/
 runs/
 tmp/

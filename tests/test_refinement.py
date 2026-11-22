@@ -122,7 +122,7 @@ class RefinementTests(unittest.TestCase):
         coarse = {k: v.clone() for k, v in target.items()}
         coarse["human"][:, -3:] += 1
         with self.assertRaisesRegex(ValueError, "Observed human"):
-            refinement_loss(model, coarse, target, "010", self.bps, self.gender, 10., ToyGeometry("behave"), self.mesh)
+            refinement_loss(model, coarse, target, "011", self.bps, self.gender, 10., ToyGeometry("behave"), self.mesh)
 
     def test_short_window_and_unknown_targets_not_forward_inputs(self):
         model = ContinuousRefiner(RefinerConfig("behave", width=16, layers=1))
@@ -149,7 +149,7 @@ class RefinementTests(unittest.TestCase):
         values = []
         for _ in range(25):
             optimizer.zero_grad()
-            loss, _, _ = refinement_loss(model, coarse, target, "010", self.bps, self.gender, 10., geometry, self.mesh, weights)
+            loss, _, _ = refinement_loss(model, coarse, target, "011", self.bps, self.gender, 10., geometry, self.mesh, weights)
             values.append(float(loss.detach()))
             loss.backward()
             optimizer.step()

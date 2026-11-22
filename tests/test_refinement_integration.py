@@ -71,12 +71,12 @@ class IntegrationTests(unittest.TestCase):
             cache = folder / "cache"
             with contextlib.redirect_stdout(io.StringIO()):
                 prepare(checkpoint, cache, device="cpu", dtype="float32", limit=1,
-                        modes=("100", "010", "001", "111"))
+                        modes=("111", "101", "011"), text_conditioned=False)
                 index_hash = digest_file(cache / "index.jsonl")
                 prepare(checkpoint, cache, device="cpu", dtype="float32", limit=1,
-                        modes=("100", "010", "001", "111"), resume=True)
+                        modes=("111", "101", "011"), text_conditioned=False, resume=True)
             self.assertEqual(index_hash, digest_file(cache / "index.jsonl"))
-            self.assertEqual(len(RefinementDataset(cache, "train")), 4)
+            self.assertEqual(len(RefinementDataset(cache, "train")), 3)
             cfg = dict(kind=KIND, cache=str(cache), output=str(folder / "refiner"), device="cpu",
                        model=dict(width=16, layers=1), max_steps=1, schedule_steps=4, warmup_steps=0,
                        gradient_accumulation_steps=1, validate_every=1, log_every=1, geometry_frames=2,
@@ -90,24 +90,23 @@ class IntegrationTests(unittest.TestCase):
             for key, value in resumed["model"].items():
                 torch.testing.assert_close(value, uninterrupted["model"][key], atol=0, rtol=0)
             refined = folder / "prediction.npz"
-            sample(checkpoint, manifest, entries[1]["path"], refined, "010", frames=4, text_conditioned=True,
+            sample(checkpoint, manifest, entries[1]["path"], refined, "011", frames=4, text="",
                    temperature=0., refiner=folder / "refiner/last.pt")
             with np.load(refined) as a:
                 self.assertIn("refiner_sha256", a)
                 np.testing.assert_array_equal(a["human_params"], a["human_observed"])
-                np.testing.assert_array_equal(a["contact_probability"], a["contact_observed"])
             report = evaluate(refined, entries[1]["path"], manifest, checkpoint, folder / "evaluate.json", eval_fps=0.)
             self.assertEqual(report["sampler"], "autoregressive_vq_continuous_refinement")
             with contextlib.redirect_stdout(io.StringIO()):
-                scored = benchmark(checkpoint, folder / "benchmark", split="val", modes=("010", "001"),
+                scored = benchmark(checkpoint, folder / "benchmark", split="val", modes=("011",),
                                    device="cpu", dtype="float32", eval_fps=0., train_reference_fps=0., limit=1,
                                    refiner=folder / "refiner/last.pt")
-                baseline = benchmark(checkpoint, folder / "baseline", split="val", modes=("010", "001"),
+                baseline = benchmark(checkpoint, folder / "baseline", split="val", modes=("011",),
                                      device="cpu", dtype="float32", eval_fps=0., train_reference_fps=0., limit=1)
             self.assertEqual(scored["evaluation_frames_sha256"], baseline["evaluation_frames_sha256"])
             self.assertEqual(scored["coarse_reconstruction"], baseline["reconstruction"])
             self.assertEqual(scored["evaluated_frames"], 4)
-            self.assertTrue(np.isfinite(scored["reconstruction"]["010"]["OBJ_V2V"]))
+            self.assertTrue(np.isfinite(scored["reconstruction"]["011"]["OBJ_V2V"]))
 
     def test_real_omomo_body_gradients(self):
         from unified_hoi.token_ar.data import MotionDataset

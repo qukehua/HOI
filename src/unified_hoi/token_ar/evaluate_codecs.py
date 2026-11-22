@@ -10,7 +10,10 @@ from torch.utils.data import DataLoader
 
 from ..mesh_geometry import load_mesh_asset
 from ..runtime import move_batch, write_json
-from . import MODALITIES, MODES
+from . import MODALITIES
+
+# Codec reconstruction probes. These are not generation tasks and have no vocabulary tokens.
+PROBES = ("100", "010", "001", "111")
 from .body import BodyGeometry, digest_file
 from .codecs import canonicalize, load_codecs
 from .data import MotionDataset
@@ -37,12 +40,13 @@ def usage_statistics(counts):
 
 @torch.no_grad()
 def evaluate_codecs(checkpoint, output, *, manifest=None, contact_support=None, body_models="data/smplx_models",
-                    split="val", window=120, modes=("100", "010", "001", "111"), device="cpu",
+                    split="val", window=120, modes=PROBES, device="cpu",
                     profile="tridi", eval_fps=None, limit=None, evaluator=None, geometry_only=False,
                     seed=42, candidates=32, repeats=20, diversity_pairs=300):
     if (split not in ("val", "test") or window < 1 or (limit is not None and limit < 1)
-            or not modes or any(m not in MODES for m in modes) or len(set(modes)) != len(modes)):
-        raise ValueError("Require val/test, positive window/limit and distinct H/O/C masks")
+            or not modes or len(set(modes)) != len(modes)
+            or any(not (isinstance(m, str) and len(m) == 3 and set(m) <= {"0", "1"}) for m in modes)):
+        raise ValueError("Require val/test, positive window/limit and distinct H/O/C reconstruction probes")
     output = Path(output)
     if output.exists():
         raise FileExistsError(output)
@@ -187,7 +191,8 @@ def main():
     parser.add_argument("--body-models", default="data/smplx_models")
     parser.add_argument("--split", choices=("val", "test"), default="val")
     parser.add_argument("--window", type=int, default=120, help="Match AR evaluation window length")
-    parser.add_argument("--modes", nargs="+", choices=MODES, default=["100", "010", "001", "111"])
+    parser.add_argument("--modes", nargs="+", choices=PROBES, default=list(PROBES),
+                        help="Codec reconstruction probes, not generation tasks")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--profile", choices=("tridi", "native"), default="tridi")
     parser.add_argument("--eval-fps", type=float, help="Default: tridi 1fps; native all frames (0)")

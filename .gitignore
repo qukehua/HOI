@@ -1,6 +1,8 @@
 .venv/
 venv-text/
 external/
+tests/
+tools/
 data/
 datasets/
 OMOMO/

@@ -1,8 +1,8 @@
 # Token-AR：masked autoregressive VQ 的 HOI 模型
 
-项目只保留本模型（`tokenar_hoi/token_ar/`，架构标识 `token_ar_v1`，配置在 `token_ar/`）。原连续扩散模型已于2026-10-29删除，可从 git 历史恢复；扩散检查点与本模型不兼容。
+项目只保留本模型（`tokenar_hoi/token_ar/`，架构标识 `token_ar_v1`，配置在 `config/`）。原连续扩散模型已于2026-10-29删除，可从 git 历史恢复；扩散检查点与本模型不兼容。
 
-**正式模型：`Qwen/Qwen3.5-4B-Base`，全参数训练，不使用 LoRA（2026-10-22）。** 共享权重只训练三个任务：Text-to-HOI、Object-to-Human、Human-to-Object。两套数据的配置为 `token_ar/qwen35_4b_behave.yaml` 和 `qwen35_4b_omomo.yaml`，配套四卡配置为 `accelerate_qwen35_4gpu.yaml`。
+**正式模型：`Qwen/Qwen3.5-4B-Base`，全参数训练，不使用 LoRA（2026-10-22）。** 共享权重只训练三个任务：Text-to-HOI、Object-to-Human、Human-to-Object。两套数据的配置为 `config/qwen35_4b_behave.yaml` 和 `qwen35_4b_omomo.yaml`，配套四卡配置为 `accelerate_qwen35_4gpu.yaml`。
 
 身体解码、数据读取、评估协议和指标函数最初从扩散模型复制后修改，来源及原文件 SHA256 记录在 `TOKEN_AR_ORIGIN.json`。`tokenar_hoi/` 顶层的清单、旋转、网格 BPS、SMPL 网格和运行工具由本模型直接使用。
 
@@ -82,16 +82,16 @@ pip install -e '.[body,token-ar]'
 pip install flash-linear-attention causal-conv1d --no-build-isolation
 
 # 独立评价器：仅train动作与文本训练；冻结后供VQ评价使用，不参与VQ反传。
-python -m unified_hoi.token_ar.train_evaluator --config token_ar/evaluator_behave.yaml
-python -m unified_hoi.token_ar.train_evaluator --config token_ar/evaluator_omomo.yaml
+python -m unified_hoi.token_ar.train_evaluator --config config/evaluator_behave.yaml
+python -m unified_hoi.token_ar.train_evaluator --config config/evaluator_omomo.yaml
 
 # 第一阶段：独立训练H/O/C的VQ-VAE；此入口目前用单GPU。
-python -m unified_hoi.token_ar.train_codecs --config token_ar/vq_omomo.yaml
-python -m unified_hoi.token_ar.train_codecs --config token_ar/vq_behave.yaml
+python -m unified_hoi.token_ar.train_codecs --config config/vq_omomo.yaml
+python -m unified_hoi.token_ar.train_codecs --config config/vq_behave.yaml
 
 # 第二阶段：已选定 Qwen3.5-4B-Base，全参数训练，三个任务共用一套权重。
-accelerate launch --config_file token_ar/accelerate_qwen35_4gpu.yaml \
-  --module unified_hoi.token_ar.train --config token_ar/qwen35_4b_omomo.yaml
+accelerate launch --config_file config/accelerate_qwen35_4gpu.yaml \
+  --module unified_hoi.token_ar.train --config config/qwen35_4b_omomo.yaml
 ```
 
 BEHAVE把配置后缀换成 `behave`。两个数据集分别训练，不要交换码本。正式步数是实验起点，需根据VQ重建及验证表现调整。现有原生数据无需重新转换；原生人体模型、contact support和对象网格仍需随 `data/` 迁移。
@@ -103,11 +103,11 @@ BEHAVE把配置后缀换成 `behave`。两个数据集分别训练，不要交�
 不能用旧浅层VQ的`last.pt`续训新结构。更换码本需要新的AR实验，已有AR结果的复评继续使用检查点内绑定的`codecs.pt`。固定训练预算后评估最终权重的重建质量，记录step与SHA256；启动AR后不要继续覆盖其来源VQ文件。新版不产生VQ `best.pt`；旧检查点和历史训练分支仍可读取。
 
 ```bash
-python -m unified_hoi.token_ar.train_codecs --config token_ar/vq_omomo.yaml \
+python -m unified_hoi.token_ar.train_codecs --config config/vq_omomo.yaml \
   --resume runs/token_ar/omomo/vq_residual_ema_512x4096/last.pt
 
-accelerate launch --config_file token_ar/accelerate_qwen35_4gpu.yaml \
-  --module unified_hoi.token_ar.train --config token_ar/qwen35_4b_omomo.yaml \
+accelerate launch --config_file config/accelerate_qwen35_4gpu.yaml \
+  --module unified_hoi.token_ar.train --config config/qwen35_4b_omomo.yaml \
   --resume runs/token_ar/omomo/qwen35_4b_full_vq_ema/checkpoint-0001000
 ```
 
@@ -122,11 +122,11 @@ AR续训保持配置和进程数一致，可提高max_steps；VQ码本或清单�
 ```bash
 # 在服务器项目根目录运行；Windows把解释器换成 .venv/Scripts/python.exe。
 .venv/bin/python -m unified_hoi.token_ar.train_evaluator \
-  --config token_ar/evaluator_behave.yaml
+  --config config/evaluator_behave.yaml
 
 # 可独立进行VQ训练；只在下面评价前需要训练好的评价器。
 .venv/bin/python -m unified_hoi.token_ar.train_codecs \
-  --config token_ar/vq_behave.yaml
+  --config config/vq_behave.yaml
 
 .venv/bin/python -m unified_hoi.token_ar.evaluate_codecs \
   --checkpoint runs/token_ar/behave/vq_residual_ema_512x4096/last.pt \
@@ -135,7 +135,7 @@ AR续训保持配置和进程数一致，可提高max_steps；VQ码本或清单�
   --output runs/eval_behave_vq_motion_text
 
 # 评价器续训，max_steps可增加；不要用VQ重建样本训练评价器。
-# python -m unified_hoi.token_ar.train_evaluator --config token_ar/evaluator_behave.yaml \
+# python -m unified_hoi.token_ar.train_evaluator --config config/evaluator_behave.yaml \
 #   --resume runs/token_ar/behave/motion_text_evaluator/last.pt
 ```
 
@@ -264,10 +264,10 @@ python -m unified_hoi.token_ar.prepare_refinement \
 
 # 2. 训练小型修正网络；自动保存初始基线、best.pt、last.pt和逐次验证记录。
 python -m unified_hoi.token_ar.train_refiner \
-  --config token_ar/refiner_behave.yaml
+  --config config/refiner_behave.yaml
 
 # 续训：配置schedule_steps保持不变，可增加max_steps，优化器/调度器/抽样状态恢复。
-# python -m unified_hoi.token_ar.train_refiner --config token_ar/refiner_behave.yaml \
+# python -m unified_hoi.token_ar.train_refiner --config config/refiner_behave.yaml \
 #   --resume runs/token_ar/behave/refiner_step1000/last.pt
 
 # 3. 同一批AR样本，对比修正前后的重建指标。
@@ -282,6 +282,6 @@ python -m unified_hoi.token_ar.benchmark \
 
 `sample`同样支持`--refiner`，使用上面缓存时需加`--temperature 0 --text-conditioned`。采样温度/top-k（随机采样时）和文本开关必须匹配缓存设置。输出NPZ保留`coarse_human/object/contact`和修正后结果；保存的VQ token对应粗生成值，不能用于重新解码得到修正后运动。`evaluate`可直接复评修正结果并保留修正检查点SHA256。
 
-修正检查点绑定原AR metadata、VQ、接触支持和身体资产哈希；1000步训练的修正器不能直接附加到24000步AR。缓存训练还验证原生样本和物体网格哈希。跨数据集不能混用；OMOMO配置为`token_ar/refiner_omomo.yaml`，需要先用其AR检查点制作对应缓存。
+修正检查点绑定原AR metadata、VQ、接触支持和身体资产哈希；1000步训练的修正器不能直接附加到24000步AR。缓存训练还验证原生样本和物体网格哈希。跨数据集不能混用；OMOMO配置为`config/refiner_omomo.yaml`，需要先用其AR检查点制作对应缓存。
 
 验证：`python -B -m unittest discover -s tests -p 'test_refinement*.py' -v`。覆盖两种身体表示、三个任务的条件保持、SO(3)合法性、几何梯度、冻结边界、检查点绑定、真实SMPL-H/SMPL-X资产、小型随机Qwen的缓存/训练/精确续训/采样/复评/配对benchmark。CPU流程验证不证明4B生成质量或正式训练后的收益。

@@ -3,6 +3,10 @@ venv-text/
 external/
 tests/
 tools/
+.specstory/
+.vscode/
+.cursorindexingignore
+pyproject.toml
 data/
 datasets/
 OMOMO/

@@ -5,15 +5,15 @@
   "copied_files": {
     "body.py": {
       "sha256": "d7b8c3691da295730959065b4b92f7c501e27f401cc79330374f4d1d110932aa",
-      "copy": "src/unified_hoi/token_ar/body.py"
+      "copy": "tokenar_hoi/token_ar/body.py"
     },
     "data.py": {
       "sha256": "b5f518625366cddf75636d2a275d34cd6fa762cbe50ab3155f1072c1dbdbff24",
-      "copy": "src/unified_hoi/token_ar/native_data.py"
+      "copy": "tokenar_hoi/token_ar/native_data.py"
     },
     "evaluation_protocol.py": {
       "sha256": "86efbebfdb9c4c555a5f8cf7a4cdcfeecd3e0c99978d9e9c4cef3df7c2e8f1d5",
-      "copy": "src/unified_hoi/token_ar/evaluation_protocol.py"
+      "copy": "tokenar_hoi/token_ar/evaluation_protocol.py"
     }
   },
   "baseline_sha256": {

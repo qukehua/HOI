@@ -1,6 +1,6 @@
 # Unified Controllable HOI — Token-AR
 
-项目只保留 token 自回归模型 `src/unified_hoi/token_ar/`：三套独立 VQ-VAE 把人体 H、物体 O、接触 C 编码为离散 token，语言模型 backbone 在 H/O/C mask 条件下自回归生成，再由 VQ 解码。正式方案为 **Qwen3.5-4B-Base 全参数训练、共享七种 mask，不使用 LoRA**。原连续扩散模型（`parametric/`）已删除，可从 git 历史恢复；其检查点不能用当前代码运行。
+项目只保留 token 自回归模型 `tokenar_hoi/token_ar/`：三套独立 VQ-VAE 把人体 H、物体 O、接触 C 编码为离散 token，语言模型 backbone 在 H/O/C mask 条件下自回归生成，再由 VQ 解码。正式方案为 **Qwen3.5-4B-Base 全参数训练、共享七种 mask，不使用 LoRA**。原连续扩散模型（`parametric/`）已删除，可从 git 历史恢复；其检查点不能用当前代码运行。
 
 模型、mask、四卡配置、训练与推理命令见 [Token-AR 说明](docs/TOKEN_AR.md)。
 
@@ -17,20 +17,20 @@
 
 ```bash
 # 独立训练评价器（仅train）；需保留清单引用的CLIP文本缓存。
-python -m unified_hoi.token_ar.train_evaluator --config configs/token_ar/evaluator_behave.yaml
+python -m unified_hoi.token_ar.train_evaluator --config token_ar/evaluator_behave.yaml
 # 第一阶段：VQ-VAE
-python -m unified_hoi.token_ar.train_codecs --config configs/token_ar/vq_behave.yaml
+python -m unified_hoi.token_ar.train_codecs --config token_ar/vq_behave.yaml
 # VQ动作—文本重建评价；自动读取配置中的冻结评价器last.pt。
 python -m unified_hoi.token_ar.evaluate_codecs \
   --checkpoint runs/token_ar/behave/vq_residual_ema_512x4096/last.pt \
   --split val --device cuda:0 --output runs/eval_behave_vq_motion_text
 # 第二阶段：Qwen3.5-4B 四卡全参数
-accelerate launch --config_file configs/token_ar/accelerate_qwen35_4gpu.yaml \
-  --module unified_hoi.token_ar.train --config configs/token_ar/qwen35_4b_behave.yaml
+accelerate launch --config_file token_ar/accelerate_qwen35_4gpu.yaml \
+  --module unified_hoi.token_ar.train --config token_ar/qwen35_4b_behave.yaml
 # 评估 BEHAVE test（40000步）
 # 重建指标 + 1-NNA/COV/MMD/SD，以及文本驱动 111 的 FID / R-precision Top-1/2/3 / Diversity。
 # 在项目根目录运行。输出目录必须不存在；结果在 summary.json 的 reconstruction 和 motion_text。
-PYTHONPATH=src python -m unified_hoi.token_ar.benchmark \
+python -m unified_hoi.token_ar.benchmark \
   --checkpoint runs/token_ar/behave/behave/checkpoint-0040000 \
   --motion-text-evaluator runs/token_ar/behave/motion_text_evaluator/last.pt \
   --split test --modes 100 010 001 111 --temperature 0 \
@@ -50,9 +50,9 @@ PYTHONPATH=src python -m unified_hoi.token_ar.benchmark \
 
 ## 代码目录
 
-- `src/unified_hoi/token_ar/`：VQ-VAE、AR 模型、训练、采样、单条复评（`evaluate`）和批量基准（`benchmark`）。
-- `src/unified_hoi/`：token_ar 复用的清单读取、旋转、网格 BPS、SMPL 网格解码/导出和运行工具。
-- `configs/token_ar/`：VQ、Qwen3.5-4B 正式配置及四卡 accelerate 配置。
+- `tokenar_hoi/token_ar/`：VQ-VAE、AR 模型、训练、采样、单条复评（`evaluate`）和批量基准（`benchmark`）。
+- `tokenar_hoi/`：token_ar 复用的清单读取、旋转、网格 BPS、SMPL 网格解码/导出和运行工具。
+- `token_ar/`：VQ、Qwen3.5-4B 正式配置及四卡 accelerate 配置。
 - `docs/TOKEN_AR.md`：训练、推理和评估说明；`docs/TOKEN_AR_ORIGIN.json`：复制来源记录。
 
 整个 `external/` 及原始 `OMOMO/` 受保护，不参与清理。

@@ -27,7 +27,8 @@ hoi-token-cache-refinement = "tokenar_hoi.token_ar.prepare_refinement:main"
 hoi-token-train-refiner = "tokenar_hoi.token_ar.train_refiner:main"
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
+include = ["tokenar_hoi*"]
 
 [tool.ruff]
 line-length = 110

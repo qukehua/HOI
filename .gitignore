@@ -1,4 +1,6 @@
 .venv/
+venv-text/
+external/
 data/
 datasets/
 OMOMO/
@@ -13,3 +15,5 @@ __pycache__/
 dist/
 build/
 /OMOMO.rar
+# GitHub rejects a single file larger than 100MB.
+/InterAct.zip

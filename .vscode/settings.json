@@ -1,3 +1,5 @@
 {
-    "specstory.cloudSync.enabled": "never"
+    "specstory.cloudSync.enabled": "never",
+    "python.defaultInterpreterPath": "/root/miniforge/envs/tokenar/bin/python",
+    "python.terminal.activateEnvironment": true
 }

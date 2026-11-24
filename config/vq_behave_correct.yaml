@@ -24,8 +24,11 @@ validation_batches: 16
 log_every: 20
 use_swanlab: true
 swanlab_project: HOI
-swanlab_run_name: behave_vq_correct
+swanlab_run_name: behave_vq_t2m
 swanlab_mode: online
+# Human objective follows T2M-GPT: one Smooth L1 on the normalized pose
+# (root rotation, body, hands, translation; beta excluded), one velocity
+# term on that vector's frame difference, plus commitment.
 codec:
   canonical_scene: true
   codebook_size: 512

@@ -22,7 +22,7 @@ class CodecConfig:
     commitment_weight: float = .25
     velocity_weight: float = .1
     canonical_scene: bool = False
-    joint_weight: float = 1.
+    joint_weight: float = 1.  # unused by the human objective; kept so older checkpoints load
     body_weight: float = .1
     network: str = "legacy"
     quantizer: str = "gradient"
@@ -183,44 +183,49 @@ class MotionVQVAE(nn.Module):
         cosine = (relative.diagonal(dim1=-2, dim2=-1).sum(-1) - 1) * .5
         return torch.acos(cosine.clamp(-1 + 1e-6, 1 - 1e-6))
 
-    def _scene_errors(self, pred, target, gender, geometry):
-        """Per-sample geometric errors. Hands are down-weighted; root is not averaged away."""
+    def _human_motion_loss(self, normalized_pred, normalized_target):
+        """One Smooth L1 on the normalized pose vector, and one on its frame difference.
+
+        Beta is a per-sequence constant and is left out. Root rotation, body, hands and
+        translation stay as channels of that single vector.
+        """
+        start = beta_count(self.config.dataset)
+        pred, target = normalized_pred[..., start:], normalized_target[..., start:]
+        reconstruction = F.smooth_l1_loss(pred, target, reduction="none").mean((1, 2))
+        if pred.shape[1] > 1:
+            velocity = F.smooth_l1_loss(pred.diff(dim=1), target.diff(dim=1), reduction="none").mean((1, 2))
+        else:
+            velocity = reconstruction.new_zeros(reconstruction.shape)
+        return reconstruction, velocity
+
+    @torch.no_grad()
+    def _human_readout(self, pred, target, gender, geometry):
+        """Detached geometry for logs and checkpoint selection. Not part of the loss."""
+        n = beta_count(self.config.dataset)
+        root = self._rotation_angle(pred[..., n:n + 6], target[..., n:n + 6]).mean()
+        body = self._rotation_angle(pred[..., n + 6:n + 132].reshape(*pred.shape[:2], 21, 6),
+                                    target[..., n + 6:n + 132].reshape(*target.shape[:2], 21, 6)).mean()
+        translation = (pred[..., -3:] - target[..., -3:]).norm(dim=-1).mean()
+        joints = pred.new_zeros(())
+        if geometry is not None and gender is not None:
+            _, predicted = geometry(pred[:, ::4], gender)
+            _, truth = geometry(target[:, ::4], gender)
+            delta = (predicted - predicted[..., :1, :]) - (truth - truth[..., :1, :])
+            joints = delta.norm(dim=-1).mean()
+        return {"root_deg": torch.rad2deg(root), "body_deg": torch.rad2deg(body),
+                "trans_cm": translation * 100, "joint_cm": joints * 100}
+
+    def _scene_errors(self, pred, target):
+        """Object reconstruction: rotation angle plus translation, with one velocity term."""
         if pred.shape[1] > 1:
             speed = (pred[:, 1:, -3:] - pred[:, :-1, -3:] - (target[:, 1:, -3:] - target[:, :-1, -3:])).norm(dim=-1).mean(1)
+            speed = speed + (self._delta_angle(pred[..., 3:]) - self._delta_angle(target[..., 3:])).abs().mean(1)
         else:
             speed = pred.new_zeros(pred.shape[0])
-        if self.role == "object":
-            angle = self._rotation_angle(pred[..., 3:], target[..., 3:]).mean(1)
-            if pred.shape[1] > 1:
-                speed = speed + (self._delta_angle(pred[..., 3:]) - self._delta_angle(target[..., 3:])).abs().mean(1)
-            translation = (pred[..., :3] - target[..., :3]).norm(dim=-1).mean(1)
-            loss = angle + translation
-            extra = {"rot_deg": torch.rad2deg(angle.mean()), "trans_cm": translation.mean() * 100}
-            return loss, speed, extra
-        n = beta_count(self.config.dataset)
-        root = self._rotation_angle(pred[..., n:n + 6], target[..., n:n + 6]).mean(1)
-        body = self._rotation_angle(pred[..., n + 6:n + 132].reshape(*pred.shape[:2], 21, 6),
-                                    target[..., n + 6:n + 132].reshape(*target.shape[:2], 21, 6)).mean((1, 2))
-        if pred.shape[1] > 1:
-            speed = speed + (self._delta_angle(pred[..., n:n + 6]) - self._delta_angle(target[..., n:n + 6])).abs().mean(1)
-            speed = speed + self.config.body_weight * (
-                self._delta_angle(pred[..., n + 6:n + 132].reshape(*pred.shape[:2], 21, 6))
-                - self._delta_angle(target[..., n + 6:n + 132].reshape(*target.shape[:2], 21, 6))).abs().mean((1, 2))
-        translation = (pred[..., -3:] - target[..., -3:]).norm(dim=-1).mean(1)
-        beta = (pred[..., :n] - target[..., :n]).square().mean((1, 2))
-        hands = (pred[..., n + 132:-3] - target[..., n + 132:-3]).square().mean((1, 2))
-        joints = pred.new_zeros(pred.shape[0])
-        if geometry is not None and gender is not None:
-            pred_j, target_j = pred[:, ::4], target[:, ::4]
-            _, predicted = geometry(pred_j, gender)
-            with torch.no_grad():
-                _, truth = geometry(target_j.detach(), gender)
-            delta = (predicted - predicted[..., :1, :]) - (truth - truth[..., :1, :])
-            joints = delta.norm(dim=-1).mean((1, 2))
-        loss = root + self.config.body_weight * body + translation + .1 * beta + .01 * hands + self.config.joint_weight * joints
-        extra = {"root_deg": torch.rad2deg(root.mean()), "body_deg": torch.rad2deg(body.mean()),
-                 "trans_cm": translation.mean() * 100, "joint_cm": joints.mean() * 100}
-        return loss, speed, extra
+        angle = self._rotation_angle(pred[..., 3:], target[..., 3:]).mean(1)
+        translation = (pred[..., :3] - target[..., :3]).norm(dim=-1).mean(1)
+        extra = {"rot_deg": torch.rad2deg(angle.mean()), "trans_cm": translation.mean() * 100}
+        return angle + translation, speed, extra
 
     def _grouped_loss(self, values, valid, gender=None, geometry=None):
         # Group by exact valid length: convolutions never see padded frames. Full windows
@@ -275,10 +280,17 @@ class MotionVQVAE(nn.Module):
                 predicted, positive = contact_active(restored), contact_active(target)
                 contact_counts.append(((predicted & positive).sum(), (predicted & ~positive).sum(),
                                        (~predicted & positive).sum()))
-            elif self.config.canonical_scene and self.role in ("human", "object"):
-                pred = pred * self.std + self.mean
+            elif self.config.canonical_scene and self.role == "human":
+                normalized_target = (target - self.mean) / self.std
+                term, speed = self._human_motion_loss(pred, normalized_target)
+                rec.append(term)
+                velocity.append(speed)
+                restored = pred * self.std + self.mean
                 gender_group = None if gender is None else gender[index]
-                term, speed, extra = self._scene_errors(pred, target, gender_group, geometry)
+                extras.append(self._human_readout(restored, target, gender_group, geometry))
+            elif self.config.canonical_scene and self.role == "object":
+                restored = pred * self.std + self.mean
+                term, speed, extra = self._scene_errors(restored, target)
                 rec.append(term)
                 velocity.append(speed)
                 extras.append(extra)

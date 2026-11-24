@@ -2,6 +2,16 @@
 
 Token-AR encodes human motion, object motion, and contact with three separate VQ-VAEs, then generates the missing modalities with a fully fine-tuned [Qwen3.5-4B-Base](https://huggingface.co/Qwen/Qwen3.5-4B-Base). Training, codebooks, and checkpoints are kept separate for each dataset. All commands run from the repository root.
 
+## Tasks
+
+One backbone per dataset covers all three tasks. GRAB is not accepted by the VQ-VAE or the backbone.
+
+| Dataset | Text-to-interaction | Object-to-human | Human-to-object |
+| --- | --- | --- | --- |
+| BEHAVE | ✔ | ✔ | ✔ |
+| OMOMO | ✔ | ✔ | ✔ |
+| GRAB | — | — | — |
+
 ## Installation
 
 ```bash

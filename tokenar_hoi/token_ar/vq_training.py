@@ -144,7 +144,7 @@ def _run_independent(config, resume=None):
                                       lr=config.get("learning_rate", 2e-4),
                                       weight_decay=config.get("weight_decay", 0.)) for k, v in model.models.items()}
     metadata = dict(config=config, support_sha256=support, manifest_sha256=digest_file(config["manifest"]),
-                    trainer="independent_vq_v2", contact_threshold=.5, selection="final_checkpoint",
+                    trainer="independent_vq_v2", contact_threshold=.5, selection="lowest_validation_loss",
                     modality_budgets=budgets)
     step, epoch, skip = 0, 0, 0
     updates = dict.fromkeys(MODALITIES, 0)
@@ -206,6 +206,8 @@ def _run_independent(config, resume=None):
         fid_loader = DataLoader(fid_data, batch_sampler=[[i] for i in range(len(fid_data))],
                                 generator=torch.Generator().manual_seed(0))
         metadata["selection"] = "lowest_validation_fid"
+    elif select_geometry:
+        metadata["selection"] = "lowest_validation_geometry"
     if maximum <= step:
         raise ValueError("Requested run has no remaining updates")
     if _rank() == 0:
@@ -216,7 +218,7 @@ def _run_independent(config, resume=None):
     local_batch = size // (dist.get_world_size() if _distributed() else 1)
     validation = DataLoader(val, batch_size=local_batch, shuffle=False,
                             generator=torch.Generator().manual_seed(0))
-    swan = init_swanlab(config, output)
+    swan = init_swanlab(config, output) if _rank() == 0 else None
     try:
         while step < maximum:
             generator = torch.Generator().manual_seed(config.get("seed", 42) + epoch)
@@ -296,6 +298,11 @@ def _run_independent(config, resume=None):
                             chosen = "best.pt"
                     elif select_geometry:
                         selection_score = _selection_score(report)
+                        if selection_score < best_selection:
+                            best_selection = selection_score
+                            chosen = "best.pt"
+                    else:
+                        selection_score = score
                         if selection_score < best_selection:
                             best_selection = selection_score
                             chosen = "best.pt"

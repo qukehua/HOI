@@ -16,11 +16,18 @@ modality_steps:
   object: 1000000
   contact: 1000000
 learning_rate: 0.0002
+# best.pt is the lowest validation geometry score: joint cm + object translation cm
+# + object rotation deg + 100 * (1 - contact F1). No text evaluator.
+select_by_geometry: true
 validate_every: 1000
 validation_batches: 16
 log_every: 20
-use_swanlab: false
+use_swanlab: true
+swanlab_project: HOI
+swanlab_run_name: behave_vq_correct
+swanlab_mode: online
 codec:
+  canonical_scene: true
   codebook_size: 512
   latent_dim: 4096
   width: 512

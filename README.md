@@ -92,6 +92,8 @@ accelerate launch --config_file config/accelerate_qwen35_4gpu.yaml \
 
 Swap the config for OMOMO. Resume with `--resume runs/token_ar/<dataset>/qwen35_4b_correct/checkpoint-XXXXXXX` and the same process count.
 
+The size ablation uses the same tasks, codebooks, and hyperparameters with Qwen3.5-9B-Base (`config/qwen35_9b_behave.yaml`, `config/qwen35_9b_omomo.yaml`). Qwen3.5 has no 8B release. Launch those configs with the same accelerate file. Both pretrained backbones are read from `data/pretrained/Qwen3.5-4B-Base` and `data/pretrained/Qwen3.5-9B-Base`.
+
 ## Evaluation
 
 Train the motion–text evaluator on the training split after setting its manifest to the corrected JSONL (`config/evaluator_behave.yaml`, `config/evaluator_omomo.yaml`).

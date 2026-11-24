@@ -9,7 +9,8 @@ stride: 60
 output: runs/token_ar/behave/qwen35_4b_tasks3_fid
 # Canonical 512x512 VQ selected by the lowest validation joint FID. A changed codebook cannot resume an old AR run.
 codecs: runs/token_ar/behave/vq_canonical_100k_fid/best.pt
-backbone: Qwen/Qwen3.5-4B-Base
+# Local snapshot of Qwen/Qwen3.5-4B-Base @ 1001bb4d826a52d1f399e183466143f4da7b741b
+backbone: data/pretrained/Qwen3.5-4B-Base
 load_dtype: float32
 train_scope: full
 gradient_checkpointing: true
@@ -37,7 +38,6 @@ log_every: 20
 selection_metric: fid
 fid_view: joint
 motion_text_evaluator: runs/token_ar/behave/motion_text_evaluator/last.pt
-backbone_revision: 1001bb4d826a52d1f399e183466143f4da7b741b
 attention_backend: sdpa
 sync_each_batch: true
 use_swanlab: true

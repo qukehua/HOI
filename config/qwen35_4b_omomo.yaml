@@ -8,7 +8,8 @@ window: 120
 stride: 60
 output: runs/token_ar/omomo/qwen35_4b_tasks3
 codecs: runs/token_ar/omomo/vq_residual_ema_512x4096/last.pt
-backbone: Qwen/Qwen3.5-4B-Base
+# Local snapshot of Qwen/Qwen3.5-4B-Base @ 1001bb4d826a52d1f399e183466143f4da7b741b
+backbone: data/pretrained/Qwen3.5-4B-Base
 load_dtype: float32
 train_scope: full
 gradient_checkpointing: true
@@ -33,6 +34,5 @@ validate_every: 1000
 validation_batches: 8
 validation_text_condition: true
 log_every: 20
-backbone_revision: 1001bb4d826a52d1f399e183466143f4da7b741b
 attention_backend: sdpa
 sync_each_batch: true

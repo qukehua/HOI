@@ -13,11 +13,12 @@ from torch.nn import functional as F
 from ..geometry import matrix_to_rotation6d, rotation6d_to_matrix
 from . import MODALITIES, MODES
 from .body import beta_count, human_dim
+from .contact_offset import CONTACT_DIM, contact_active, contact_weight, object_world, project_contact_offset
 
 KIND = "token_ar_refiner_v1"
 LOSS_WEIGHTS = dict(body_vertices=1., object_vertices=10., relative_joints=1.,
                     surface_distance=5., contact_bce=1., geometry_contact_bce=.1,
-                    contact_consistency=.1, rotation=.1, velocity=.01, residual=.01)
+                    contact_consistency=.1, contact_attraction=5., rotation=.1, velocity=.01, residual=.01)
 
 
 @dataclass
@@ -106,14 +107,14 @@ class ContinuousRefiner(nn.Module):
         super().__init__()
         self.config = config
         dim, width = human_dim(config.dataset), config.width
-        for name, size in (("human", dim), ("object", 9)):
+        for name, size in (("human", dim), ("object", 9), ("contact", CONTACT_DIM)):
             self.register_buffer(name + "_mean", torch.zeros(size))
             self.register_buffer(name + "_std", torch.ones(size))
         self.geometry = nn.Sequential(nn.Linear(3072, width), nn.GELU(), nn.Linear(width, width))
-        self.input = nn.Linear(dim + 9 + 690 + 22 * 7 + 4, width)
+        self.input = nn.Linear(dim + 9 + CONTACT_DIM + 4, width)
         self.blocks = nn.Sequential(*(TemporalBlock(width, 2 ** i) for i in range(config.layers)))
-        # 52 local rotations, root translation, object rotation/translation, contact logits.
-        self.head = nn.Linear(width, 52 * 3 + 3 + 6 + 690)
+        # 52 local rotations, root translation, object rotation/translation, contact-offset residual.
+        self.head = nn.Linear(width, 52 * 3 + 3 + 6 + CONTACT_DIM)
         nn.init.zeros_(self.head.weight)
         nn.init.zeros_(self.head.bias)
 
@@ -122,26 +123,21 @@ class ContinuousRefiner(nn.Module):
             raise ValueError("Invalid generated-bit mask")
         n = len(coarse["human"])
         if n < 1 or any(coarse[k].shape != (n, d) for k, d in
-                        (("human", human_dim(self.config.dataset)), ("object", 9), ("contact", 690))):
+                        (("human", human_dim(self.config.dataset)), ("object", 9), ("contact", CONTACT_DIM))):
             raise ValueError("Expected one unpadded H/O/C window")
         if any(not torch.isfinite(v).all() for v in coarse.values()):
             raise ValueError("Nonfinite coarse predictions")
         if not math.isfinite(float(fps)) or float(fps) <= 0:
             raise ValueError("Invalid fps")
         h, o, c = (coarse[k].detach().float() for k in MODALITIES)
-        if ((c < 0) | (c > 1)).any():
-            raise ValueError("Contact input must contain probabilities")
-        with torch.no_grad():
-            _, joints = geometry(h[None], gender.reshape(1))
-            distance, near, local = nearest_surface(joints[0, :, :22], o, vertices)
-            relation = torch.cat((local, near - local, distance[..., None]), -1).flatten(1)
         flags = h.new_tensor([int(bit) for bit in mode]).expand(n, -1)
         rate = h.new_full((n, 1), math.log(float(fps)))
         features = torch.cat(((h - self.human_mean) / self.human_std,
-                              (o - self.object_mean) / self.object_std, 2 * c - 1, relation, flags, rate), -1)
+                              (o - self.object_mean) / self.object_std,
+                              (c - self.contact_mean) / self.contact_std, flags, rate), -1)
         hidden = self.input(features) + self.geometry(bps.float().reshape(1, 3072))
         residual = self.head(self.blocks(F.gelu(hidden)))
-        pose_delta, translation, obj_delta, contact_delta = residual.split((156, 3, 6, 690), -1)
+        pose_delta, translation, obj_delta, contact_delta = residual.split((156, 3, 6, CONTACT_DIM), -1)
         result = {k: v.detach() for k, v in coarse.items()}
         if mode[0] == "1":
             beta = beta_count(self.config.dataset)
@@ -154,11 +150,11 @@ class ContinuousRefiner(nn.Module):
         if mode[1] == "1":
             rotation = rotation_delta(obj_delta[:, :3]) @ rotation6d_to_matrix(o[:, 3:])
             result["object"] = torch.cat((o[:, :3] + obj_delta[:, 3:], matrix_to_rotation6d(rotation)), -1)
-        logits = torch.logit(c.clamp(1e-5, 1 - 1e-5)) + contact_delta
+        contact = project_contact_offset(c + contact_delta)
         if mode[2] == "1":
-            result["contact"] = logits.sigmoid()
+            result["contact"] = contact
         # Observed modalities are the original tensors, never projected or decoded.
-        return result, logits
+        return result, contact
 
 
 def refinement_loss(model, coarse, target, mode, bps, gender, fps, geometry, vertices,
@@ -173,7 +169,7 @@ def refinement_loss(model, coarse, target, mode, bps, gender, fps, geometry, ver
     for key, bit in zip(MODALITIES, mode):
         if bit == "0" and not torch.equal(coarse[key], target[key]):
             raise ValueError(f"Observed {key} changed in refinement input")
-    output, logits = model(coarse, mode, bps, gender, fps, geometry, vertices)
+    output, contact_pred = model(coarse, mode, bps, gender, fps, geometry, vertices)
     n = len(output["human"])
     selected = torch.linspace(0, n - 1, min(n, geometry_frames), device=vertices.device).long()
     pv, pj = geometry(output["human"][None, selected], gender.reshape(1))
@@ -184,9 +180,10 @@ def refinement_loss(model, coarse, target, mode, bps, gender, fps, geometry, ver
         go = target["object"][selected]
         gd, _, _ = nearest_surface(gv[0], go, vertices)
         relative = object_local(gj[0, :, :22], go)
-    contact = target["contact"][selected]
+    target_feat = target["contact"][selected].reshape(-1, 690, 4)
+    binary = contact_active(target["contact"][selected]).float()
     gl = (model.config.contact_threshold - pd) / model.config.contact_softness
-    zero = logits.sum() * 0
+    zero = contact_pred.sum() * 0
     losses = {key: zero for key in LOSS_WEIGHTS}
     if mode[0] == "1":
         losses["body_vertices"] = F.mse_loss(pv, gv)
@@ -194,14 +191,18 @@ def refinement_loss(model, coarse, target, mode, bps, gender, fps, geometry, ver
         losses["object_vertices"] = object_vertex_mse(po, go, vertices)
     if "1" in mode[:2]:
         losses["relative_joints"] = F.mse_loss(object_local(pj[0, :, :22], po), relative)
-        losses["surface_distance"] = balanced_mean((pd - gd).square(), contact)
-        losses["geometry_contact_bce"] = balanced_mean(F.binary_cross_entropy_with_logits(gl, contact, reduction="none"), contact)
-        losses["contact_consistency"] = balanced_mean(F.binary_cross_entropy_with_logits(
-            gl, output["contact"][selected].detach(), reduction="none"), contact)
+        losses["surface_distance"] = balanced_mean((pd - gd).square(), binary)
+        losses["geometry_contact_bce"] = balanced_mean(F.binary_cross_entropy_with_logits(gl, binary, reduction="none"), binary)
+        world = object_world(target_feat[..., :3], po)
+        attraction = (pv[0] - world).norm(dim=-1)
+        active = binary >= .5
+        losses["contact_attraction"] = attraction[active].mean() if active.any() else attraction.sum() * 0
+        pred_dist = output["contact"][selected].reshape(-1, 690, 4)[..., 3]
+        losses["contact_consistency"] = (pred_dist - pd.detach()).square().mean()
     if mode[2] == "1":
-        losses["contact_bce"] = balanced_mean(F.binary_cross_entropy_with_logits(logits, target["contact"], reduction="none"), target["contact"])
-        losses["contact_consistency"] = losses["contact_consistency"] + balanced_mean(
-            F.binary_cross_entropy_with_logits(logits[selected], gl.detach().sigmoid(), reduction="none"), contact)
+        weight = contact_weight(target["contact"])
+        error = (output["contact"] - target["contact"]).square()
+        losses["contact_bce"] = (error * weight).sum() / weight.sum().clamp_min(1)
     for key, bit in zip(MODALITIES[:2], mode[:2]):
         if bit == "0":
             continue

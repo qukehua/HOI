@@ -1,9 +1,11 @@
 """Independent H/O/C update budgets, exact full batches and resumable EMA state."""
 from dataclasses import asdict
 import json
+import os
 from pathlib import Path
 
 import torch
+import torch.distributed as dist
 from torch.utils.data import DataLoader
 
 from ..runtime import move_batch, save_checkpoint, seed_everything, write_json
@@ -47,7 +49,63 @@ def _selection_score(report):
             + 100. * (1. - report["contact_f1"]))
 
 
+def _distributed():
+    return dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1
+
+
+def _rank():
+    return dist.get_rank() if _distributed() else 0
+
+
+def _sync_grads(module):
+    if not _distributed():
+        return
+    world = dist.get_world_size()
+    for param in module.parameters():
+        if param.grad is not None:
+            dist.all_reduce(param.grad, op=dist.ReduceOp.SUM)
+            param.grad.div_(world)
+
+
+def _average(value):
+    if not _distributed():
+        return value
+    tensor = value.detach().float().clone()
+    dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
+    return tensor / dist.get_world_size()
+
+
+def _vq_worker(rank, world, config, resume):
+    os.environ["RANK"] = str(rank)
+    os.environ["WORLD_SIZE"] = str(world)
+    os.environ["MASTER_ADDR"] = os.environ.get("MASTER_ADDR", "127.0.0.1")
+    os.environ["MASTER_PORT"] = os.environ.get("MASTER_PORT", "29561")
+    dist.init_process_group("nccl", rank=rank, world_size=world)
+    torch.cuda.set_device(rank)
+    local = dict(config)
+    local["device"] = f"cuda:{rank}"
+    try:
+        _run_independent(local, resume)
+    finally:
+        dist.destroy_process_group()
+
+
 def run_independent(config, resume=None):
+    gpus = int(config.get("gpus", 1))
+    if gpus > 1 and not _distributed():
+        visible = torch.cuda.device_count()
+        if gpus > visible:
+            raise ValueError(f"Requested {gpus} GPUs but only {visible} are visible")
+        if int(config.get("batch_size", 128)) % gpus:
+            raise ValueError("batch_size must divide evenly across the GPUs")
+        os.environ["MASTER_ADDR"] = "127.0.0.1"
+        os.environ["MASTER_PORT"] = str(config.get("master_port", 29561))
+        torch.multiprocessing.spawn(_vq_worker, args=(gpus, config, resume), nprocs=gpus, join=True)
+        return {"output": str(config["output"]), "gpus": gpus}
+    return _run_independent(config, resume)
+
+
+def _run_independent(config, resume=None):
     from .train_codecs import _MUTABLE, finish_swanlab, init_swanlab, log_swanlab, validate_report
     budgets = config["modality_steps"]
     if set(budgets) != set(MODALITIES) or any(type(v) is not int or v < 1 for v in budgets.values()):
@@ -63,7 +121,8 @@ def run_independent(config, resume=None):
     torch.set_num_threads(config.get("cpu_threads", 4))
     support = digest_file(config["contact_support"])
     kwargs = dict(manifest=config["manifest"], dataset=config["dataset"], support_hash=support,
-                  window=config.get("window", 120), include_geometry=False)
+                  window=config.get("window", 120), include_geometry=False,
+                  contact_support=config["contact_support"], body_models=config.get("body_models", "data/smplx_models"))
     train = MotionDataset(split="train", stride=config.get("stride", 60), **kwargs)
     val = MotionDataset(split="val", **kwargs)
     if len(train) < size or not len(val):
@@ -73,6 +132,10 @@ def run_independent(config, resume=None):
     model.fit_normalization(train)
     device = torch.device(config.get("device", "cuda:0"))
     model.to(device)
+    if _distributed():
+        for module in model.models.values():
+            dist.broadcast(module.mean, src=0)
+            dist.broadcast(module.std, src=0)
     if cfg.canonical_scene:
         # A list is not registered as a submodule, so the body model stays out of the checkpoint.
         model.scene_geometry = [BodyGeometry(config["dataset"], config["contact_support"],
@@ -145,9 +208,13 @@ def run_independent(config, resume=None):
         metadata["selection"] = "lowest_validation_fid"
     if maximum <= step:
         raise ValueError("Requested run has no remaining updates")
-    output.mkdir(parents=True, exist_ok=True)
-    write_json(output / "config.json", config)
-    validation = DataLoader(val, batch_size=size, shuffle=False,
+    if _rank() == 0:
+        output.mkdir(parents=True, exist_ok=True)
+        write_json(output / "config.json", config)
+    if _distributed():
+        dist.barrier()
+    local_batch = size // (dist.get_world_size() if _distributed() else 1)
+    validation = DataLoader(val, batch_size=local_batch, shuffle=False,
                             generator=torch.Generator().manual_seed(0))
     swan = init_swanlab(config, output)
     try:
@@ -156,6 +223,10 @@ def run_independent(config, resume=None):
             order = torch.randperm(len(train), generator=generator).tolist()
             # Drop the random tail so EVERY update has exactly the requested batch size.
             batches = [order[i:i + size] for i in range(0, len(order) - size + 1, size)]
+            if _distributed():
+                world, rank = dist.get_world_size(), dist.get_rank()
+                local = size // world
+                batches = [batch[rank * local:(rank + 1) * local] for batch in batches]
             loader = DataLoader(train, batch_sampler=batches[skip:], generator=generator)
             for index, batch in enumerate(loader, start=skip):
                 batch = move_batch(batch, device)
@@ -176,11 +247,12 @@ def run_independent(config, resume=None):
                     if not torch.isfinite(loss):
                         raise FloatingPointError(f"Nonfinite {key} VQ loss")
                     loss.backward()
+                    _sync_grads(module)
                     torch.nn.utils.clip_grad_norm_(module.parameters(), 1.)
                     optimizer.step()
                     updates[key] += 1
-                    stats[key + "_loss"] = float(loss.detach())
-                    stats.update({key + "_" + k: float(v.detach()) for k, v in detail.items()})
+                    stats[key + "_loss"] = float(_average(loss))
+                    stats.update({key + "_" + k: float(_average(v)) for k, v in detail.items()})
                     if cfg.quantizer == "gradient" and config.get("reset_unused_every", 100):
                         if updates[key] % config.get("reset_unused_every", 100) == 0:
                             unused = module.usage == 0
@@ -189,7 +261,7 @@ def run_independent(config, resume=None):
                                 if field in optimizer.state[module.codebook.weight]:
                                     optimizer.state[module.codebook.weight][field][unused] = 0
                 step += 1
-                if step == 1 or step % config.get("log_every", 20) == 0:
+                if _rank() == 0 and (step == 1 or step % config.get("log_every", 20) == 0):
                     print(json.dumps(dict(step=step, modality_updates=updates, **stats)), flush=True)
                     log_swanlab(swan, {"train/" + k: v for k, v in stats.items()}, step)
                 boundary = any(step == budget for budget in budgets.values())
@@ -227,44 +299,47 @@ def run_independent(config, resume=None):
                         if selection_score < best_selection:
                             best_selection = selection_score
                             chosen = "best.pt"
-                    payload = codec_payload(model, dict(metadata, optimizers={k: v.state_dict() for k, v in optimizers.items()},
-                        step=step, epoch=epoch, next_batch=index + 1, modality_updates=dict(updates),
-                        codec_config=asdict(cfg), validation_loss=score,
-                        contact_frozen=contact_frozen, best_contact_loss=best_contact,
-                        contact_stalls=contact_stalls, best_selection=best_selection,
-                        contact_snapshot=contact_snapshot, selection_score=selection_score,
-                        figure_metrics=figure, torch_rng=torch.get_rng_state(),
-                        cuda_rng=torch.cuda.get_rng_state_all() if device.type == "cuda" else []))
-                    save_checkpoint(output / "last.pt", payload)
-                    if chosen == "best.pt":
-                        save_checkpoint(output / "best.pt", payload)
-                    row = dict(step=step, modality_updates=updates, validation_loss=score, selection=chosen,
-                               contact_frozen=contact_frozen, best_selection=best_selection)
-                    if figure is None:
-                        row.update(human_joint_cm=report.get("human_joint_cm"),
-                                   object_trans_cm=report.get("object_trans_cm"),
-                                   object_rot_deg=report.get("object_rot_deg"),
-                                   contact_f1=report.get("contact_f1"),
-                                   contact_reconstruction=report.get("contact_reconstruction"),
-                                   selection_score=selection_score)
-                    else:
-                        row.update(FID=figure["FID"], R_Precision=figure["R_Precision"],
-                                   Diversity=figure["Diversity"], Diversity_real=figure["Diversity_real"],
-                                   view=figure["view"],
-                                   views={name: {key: item[key] for key in
-                                                 ("FID", "R_Precision", "Diversity", "Diversity_real")}
-                                          for name, item in figure["views"].items()})
-                    print(json.dumps(row), flush=True)
-                    numeric = {"val/" + k: v for k, v in row.items() if isinstance(v, (int, float))}
-                    if figure is not None:
-                        for key, value in figure["R_Precision"].items():
-                            numeric["val/R_Precision_" + key] = value
-                        for name, item in figure["views"].items():
-                            numeric[f"val/{name}_FID"] = item["FID"]
-                            numeric[f"val/{name}_Diversity"] = item["Diversity"]
-                            for key, value in item["R_Precision"].items():
-                                numeric[f"val/{name}_R_Precision_{key}"] = value
-                    log_swanlab(swan, numeric, step)
+                    if _rank() == 0:
+                        payload = codec_payload(model, dict(metadata, optimizers={k: v.state_dict() for k, v in optimizers.items()},
+                            step=step, epoch=epoch, next_batch=index + 1, modality_updates=dict(updates),
+                            codec_config=asdict(cfg), validation_loss=score,
+                            contact_frozen=contact_frozen, best_contact_loss=best_contact,
+                            contact_stalls=contact_stalls, best_selection=best_selection,
+                            contact_snapshot=contact_snapshot, selection_score=selection_score,
+                            figure_metrics=figure, torch_rng=torch.get_rng_state(),
+                            cuda_rng=torch.cuda.get_rng_state_all() if device.type == "cuda" else []))
+                        save_checkpoint(output / "last.pt", payload)
+                        if chosen == "best.pt":
+                            save_checkpoint(output / "best.pt", payload)
+                        row = dict(step=step, modality_updates=updates, validation_loss=score, selection=chosen,
+                                   contact_frozen=contact_frozen, best_selection=best_selection)
+                        if figure is None:
+                            row.update(human_joint_cm=report.get("human_joint_cm"),
+                                       object_trans_cm=report.get("object_trans_cm"),
+                                       object_rot_deg=report.get("object_rot_deg"),
+                                       contact_f1=report.get("contact_f1"),
+                                       contact_reconstruction=report.get("contact_reconstruction"),
+                                       selection_score=selection_score)
+                        else:
+                            row.update(FID=figure["FID"], R_Precision=figure["R_Precision"],
+                                       Diversity=figure["Diversity"], Diversity_real=figure["Diversity_real"],
+                                       view=figure["view"],
+                                       views={name: {key: item[key] for key in
+                                                     ("FID", "R_Precision", "Diversity", "Diversity_real")}
+                                              for name, item in figure["views"].items()})
+                        print(json.dumps(row), flush=True)
+                        numeric = {"val/" + k: v for k, v in row.items() if isinstance(v, (int, float))}
+                        if figure is not None:
+                            for key, value in figure["R_Precision"].items():
+                                numeric["val/R_Precision_" + key] = value
+                            for name, item in figure["views"].items():
+                                numeric[f"val/{name}_FID"] = item["FID"]
+                                numeric[f"val/{name}_Diversity"] = item["Diversity"]
+                                for key, value in item["R_Precision"].items():
+                                    numeric[f"val/{name}_R_Precision_{key}"] = value
+                        log_swanlab(swan, numeric, step)
+                    if _distributed():
+                        dist.barrier()
                 if step >= maximum:
                     break
             epoch, skip = epoch + 1, 0

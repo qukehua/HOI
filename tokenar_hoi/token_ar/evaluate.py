@@ -13,6 +13,7 @@ from .body import BodyGeometry, digest_file
 from .checkpoint import read_metadata
 from .data import load_record
 from .evaluation_protocol import frame_plan, window_selection
+from .contact_offset import contact_active
 from .metrics import reconstruction
 
 
@@ -54,19 +55,17 @@ def evaluate(prediction, reference, manifest, checkpoint, output, device="cpu", 
     geometry = BodyGeometry(dataset, support, body_models).to(device)
     if geometry.support_hash != saved["support_sha256"] or geometry.layers[str(record["gender"])].asset_hash != str(record["body_model_sha256"]):
         raise ValueError("Body/contact assets changed")
-    names = {"human": "human_params", "object": "object", "contact": "surface_contact"}
+    names = {"human": "human_params", "object": "object", "contact": "contact_offset"}
     targets = {k: torch.tensor(record[v][start:start + n], device=device, dtype=torch.float32)[None]
                for k, v in names.items()}
     states = {k: torch.tensor(values[v], device=device, dtype=torch.float32)[None]
-              for k, v in {"human": "human_params", "object": "object", "contact": "contact_probability"}.items()}
+              for k, v in {"human": "human_params", "object": "object", "contact": "contact_offset"}.items()}
     for key, bit in zip(MODALITIES, mode):
         if states[key].shape != targets[key].shape or not torch.isfinite(states[key]).all():
             raise ValueError(f"Invalid prediction shape/values for {key}")
         if bit == "0" and not torch.equal(states[key], targets[key]):
             raise ValueError(f"Observed {key} was changed")
-    if ((states["contact"] < 0) | (states["contact"] > 1)).any():
-        raise ValueError("Contact probability outside [0,1]")
-    targets["surface_contact"] = targets["contact"]
+    targets["surface_contact"] = contact_active(targets["contact"]).float()
     targets["valid_frames"] = torch.ones(1, n, dtype=torch.bool, device=device)
     targets["gender"] = torch.tensor([int(str(record["gender"]) == "male")], device=device)
     split_rows = [r for r in rows if r["split"] == row["split"]]

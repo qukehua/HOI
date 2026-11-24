@@ -9,6 +9,7 @@ from ..geometry import matrix_to_rotation6d, rotation6d_to_matrix
 from . import ARCHITECTURE, MODALITIES
 from .body import beta_count, human_dim
 from .canonical import restore_scene, to_canonical
+from .contact_offset import CONTACT_DIM, contact_active, contact_weight, project_contact_offset
 
 
 @dataclass
@@ -110,7 +111,7 @@ class MotionVQVAE(nn.Module):
 
     def _decode(self, z, length):
         value = self.decoder(z.T[None])[0].T[:length]
-        return value if self.contact else value * self.std + self.mean
+        return value * self.std + self.mean
 
     @torch.no_grad()
     def encode(self, values, valid):
@@ -121,7 +122,7 @@ class MotionVQVAE(nn.Module):
         if indices.ndim != 1 or len(indices) != (length + self.config.stride - 1) // self.config.stride:
             raise ValueError("Token count does not match requested frame length")
         value = self._decode(self.codebook(indices), length)
-        return value.sigmoid() if self.contact else value
+        return project_contact_offset(value) if self.contact else value
 
     def loss(self, values, valid, gender=None, geometry=None):
         if self.config.network == "residual" or self.config.quantizer == "ema":
@@ -146,9 +147,9 @@ class MotionVQVAE(nn.Module):
             pred = self._decode(z + (q - z).detach(), n)
             target = x[:n]
             if self.contact:
-                error = F.binary_cross_entropy_with_logits(pred, target, reduction="none")
-                classes = [error[mask].mean() for mask in (target >= .5, target < .5) if mask.any()]
-                rec.append(torch.stack(classes).mean())
+                rec.append(self._contact_reconstruction(pred[None], target[None])[0])
+                if n > 1:
+                    velocity.append(self._contact_velocity(pred[None], target[None])[0])
             else:
                 rec.append(((pred - target) / self.std).square().mean())
                 if n > 1:
@@ -160,6 +161,16 @@ class MotionVQVAE(nn.Module):
         perplexity = (-(probabilities * probabilities.clamp_min(1e-9).log()).sum()).exp()
         loss = reconstruction + vq + self.config.velocity_weight * vel
         return loss, {"reconstruction": reconstruction, "vq": vq, "velocity": vel, "perplexity": perplexity}
+
+    def _contact_reconstruction(self, pred, target):
+        weight = contact_weight(target)
+        error = ((pred - target) / self.std).square()
+        return (error * weight).sum((1, 2)) / weight.sum((1, 2)).clamp_min(1)
+
+    def _contact_velocity(self, pred, target):
+        weight = contact_weight(target)[:, 1:]
+        delta = ((pred.diff(dim=1) - target.diff(dim=1)) / self.std).square()
+        return (delta * weight).sum((1, 2)) / weight.sum((1, 2)).clamp_min(1)
 
     def _rotation_angle(self, pred, target):
         relative = rotation6d_to_matrix(pred).transpose(-1, -2) @ rotation6d_to_matrix(target)
@@ -227,15 +238,23 @@ class MotionVQVAE(nn.Module):
         flat = torch.cat([z.reshape(-1, z.shape[-1]) for _, z, _, _ in groups])
         if self.training and not bool(self.initialized):
             with torch.no_grad():
-                indices = torch.randperm(len(flat), device=flat.device)
-                indices = indices.repeat((self.config.codebook_size + len(indices) - 1) // len(indices))
-                initial = flat[indices[:self.config.codebook_size]].float()
-                initial = initial + .01 / self.config.latent_dim ** .5 * torch.randn_like(initial)
-                self.codebook.weight.copy_(initial)
+                if _rank0():
+                    indices = torch.randperm(len(flat), device=flat.device)
+                    indices = indices.repeat((self.config.codebook_size + len(indices) - 1) // len(indices))
+                    initial = flat[indices[:self.config.codebook_size]].float()
+                    initial = initial + .01 / self.config.latent_dim ** .5 * torch.randn_like(initial)
+                    self.codebook.weight.copy_(initial)
+                    if self.config.quantizer == "ema":
+                        self.ema_sum.copy_(initial)
+                        self.ema_count.fill_(1.)
+                    self.initialized.fill_(True)
+                _broadcast(self.codebook.weight)
                 if self.config.quantizer == "ema":
-                    self.ema_sum.copy_(initial)
-                    self.ema_count.fill_(1.)
-                self.initialized.fill_(True)
+                    _broadcast(self.ema_sum)
+                    _broadcast(self.ema_count)
+                flag = self.initialized.float()
+                _broadcast(flag)
+                self.initialized.copy_(flag.bool())
         flat_ids = self._nearest(flat)
         rec, quant, velocity, offset = [], [], [], 0
         extras, contact_counts = [], []
@@ -249,13 +268,11 @@ class MotionVQVAE(nn.Module):
             quant.append(commit)
             pred = self.decoder((z + (q - z).detach()).transpose(1, 2)).transpose(1, 2)[:, :n]
             if self.contact:
-                error = F.binary_cross_entropy_with_logits(pred, target, reduction="none")
-                positive = target >= .5
-                np_, nn_ = positive.sum((1, 2)), (~positive).sum((1, 2))
-                part = (error * positive).sum((1, 2)) / np_.clamp_min(1)
-                part = part + (error * ~positive).sum((1, 2)) / nn_.clamp_min(1)
-                rec.append(part / ((np_ > 0).float() + (nn_ > 0).float()))
-                predicted = pred.detach().sigmoid() >= .5
+                restored = pred * self.std + self.mean
+                rec.append(self._contact_reconstruction(restored, target))
+                if n > 1:
+                    velocity.append(self._contact_velocity(restored, target))
+                predicted, positive = contact_active(restored), contact_active(target)
                 contact_counts.append(((predicted & positive).sum(), (predicted & ~positive).sum(),
                                        (~predicted & positive).sum()))
             elif self.config.canonical_scene and self.role in ("human", "object"):
@@ -272,7 +289,7 @@ class MotionVQVAE(nn.Module):
                     velocity.append(((pred.diff(dim=1) - target.diff(dim=1)) / self.std).square().mean((1, 2)))
         reconstruction, vq = torch.cat(rec).mean(), torch.cat(quant).mean()
         vel = torch.cat(velocity).mean() if velocity else reconstruction * 0
-        counts = torch.bincount(flat_ids, minlength=self.config.codebook_size).float()
+        counts = _world_sum(torch.bincount(flat_ids, minlength=self.config.codebook_size).float())
         probabilities = counts / counts.sum()
         perplexity = (-(probabilities * probabilities.clamp_min(1e-9).log()).sum()).exp()
         resets = 0
@@ -288,20 +305,25 @@ class MotionVQVAE(nn.Module):
                 detail[key] = torch.stack([item[key] for item in extras]).mean().detach()
         if contact_counts:
             tp, fp, fn = [torch.stack(part).sum() for part in zip(*contact_counts)]
+            tp, fp, fn = _world_sum(torch.stack((tp, fp, fn)))
             detail["f1"] = (2 * tp) / (2 * tp + fp + fn).clamp_min(1)
         return loss, detail
 
     @torch.no_grad()
     def _update_ema(self, flat, ids, counts):
-        sums = torch.zeros_like(self.ema_sum).index_add_(0, ids, flat.float())
+        sums = _world_sum(torch.zeros_like(self.ema_sum).index_add_(0, ids, flat.float()))
         decay = self.config.ema_decay
         self.ema_count.mul_(decay).add_(counts, alpha=1 - decay)
         self.ema_sum.mul_(decay).add_(sums, alpha=1 - decay)
         dead = self.ema_count < self.config.ema_reset_threshold
         count = int(dead.sum())
         if count:
-            replacement = flat[torch.randint(len(flat), (count,), device=flat.device)].float()
-            replacement = replacement + .01 / self.config.latent_dim ** .5 * torch.randn_like(replacement)
+            if _rank0():
+                replacement = flat[torch.randint(len(flat), (count,), device=flat.device)].float()
+                replacement = replacement + .01 / self.config.latent_dim ** .5 * torch.randn_like(replacement)
+            else:
+                replacement = torch.empty(count, flat.shape[-1], device=flat.device)
+            _broadcast(replacement)
             self.ema_count[dead] = max(self.config.ema_reset_threshold, 1.)
             self.ema_sum[dead] = replacement * self.ema_count[dead, None]
         self.codebook.weight.copy_(self.ema_sum / self.ema_count.clamp_min(1e-5)[:, None])
@@ -325,7 +347,7 @@ class CodecBundle(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        dims = {"human": human_dim(config.dataset), "object": 9, "contact": 690}
+        dims = {"human": human_dim(config.dataset), "object": 9, "contact": CONTACT_DIM}
         self.models = nn.ModuleDict({k: MotionVQVAE(dim, config, k == "contact", role=k) for k, dim in dims.items()})
 
     def canonical_view(self, batch):
@@ -349,7 +371,7 @@ class CodecBundle(nn.Module):
             batches = dataset.normalization_batches()
         for batch in batches:
             count += int(batch["valid_frames"].sum())
-            for key in ("human", "object"):
+            for key in ("human", "object", "contact"):
                 values = batch[key][batch["valid_frames"]].double()
                 sums[key] = sums.get(key, 0) + values.sum(0)
                 squares[key] = squares.get(key, 0) + values.square().sum(0)
@@ -357,8 +379,9 @@ class CodecBundle(nn.Module):
             raise ValueError("Empty train split")
         for key in sums:
             mean = sums[key] / count
+            floor = .001 if key == "contact" else .05
             self.models[key].mean.copy_(mean.float())
-            self.models[key].std.copy_((squares[key] / count - mean.square()).clamp_min(0).sqrt().clamp_min(.05).float())
+            self.models[key].std.copy_((squares[key] / count - mean.square()).clamp_min(0).sqrt().clamp_min(floor).float())
 
     def _canonical_windows(self, dataset):
         """One training frame once, in the same per-window frame the tokenizer sees."""
@@ -369,7 +392,8 @@ class CodecBundle(nn.Module):
             item = dataset[index]
             n = end - start
             human, obj, _ = to_canonical(item["human"][:n][None], item["object"][:n][None], self.config.dataset)
-            yield {"human": human, "object": obj, "valid_frames": torch.ones(1, n, dtype=torch.bool)}
+            yield {"human": human, "object": obj, "contact": item["contact"][:n][None],
+                   "valid_frames": torch.ones(1, n, dtype=torch.bool)}
 
     def encode_view(self, view):
         return {k: self.models[k].encode(view[k], view["valid_frames"]) for k in MODALITIES}
@@ -392,15 +416,31 @@ class CodecBundle(nn.Module):
 
 
 def canonicalize(human, obj, dataset):
-    """Project generated rotations and fixed conventions, without GT body/shape inputs."""
+    """Project generated rotations onto orthonormal 6D and average shape. Hand poses stay."""
     n = beta_count(dataset)
     pose = matrix_to_rotation6d(rotation6d_to_matrix(human[:, n:-3].reshape(-1, 52, 6)))
-    if dataset == "omomo":
-        pose[:, 22:] = pose.new_tensor([1, 0, 0, 0, 1, 0])
     human = torch.cat((human[:, :n].mean(0, keepdim=True).expand(len(human), -1),
                        pose.flatten(1), human[:, -3:]), -1)
     obj = torch.cat((obj[:, :3], matrix_to_rotation6d(rotation6d_to_matrix(obj[:, 3:]))), -1)
     return human, obj
+
+
+def _world_sum(tensor):
+    import torch.distributed as dist
+    if dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1:
+        dist.all_reduce(tensor, op=dist.ReduceOp.SUM)
+    return tensor
+
+
+def _broadcast(tensor):
+    import torch.distributed as dist
+    if dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1:
+        dist.broadcast(tensor, src=0)
+
+
+def _rank0():
+    import torch.distributed as dist
+    return not (dist.is_available() and dist.is_initialized()) or dist.get_rank() == 0
 
 
 def load_codecs(path, dataset=None, support_hash=None, device="cpu"):

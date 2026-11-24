@@ -16,6 +16,7 @@ from . import MODALITIES
 PROBES = ("100", "010", "001", "111")
 from .body import BodyGeometry, digest_file
 from .codecs import canonicalize, load_codecs
+from .contact_offset import contact_active
 from .data import MotionDataset
 from .evaluation_protocol import aggregate_reports, fingerprint, frame_plan, protocol_options, window_selection
 from .metrics import contact_scores, mesh_contacts, reconstruction
@@ -76,7 +77,8 @@ def evaluate_codecs(checkpoint, output, *, manifest=None, contact_support=None, 
     if manifest_matches is False:
         print("Warning: manifest differs from VQ training; verify evaluation frame/reference hashes.", flush=True)
     geometry = BodyGeometry(dataset_name, contact_support, body_models).to(device).eval()
-    dataset = MotionDataset(manifest, split, dataset_name, support_hash, window, include_geometry=False)
+    dataset = MotionDataset(manifest, split, dataset_name, support_hash, window, include_geometry=False,
+                             contact_support=contact_support, body_models=body_models)
     if not len(dataset):
         raise ValueError("No evaluation windows")
     # Evaluation uses nonoverlapping windows, independent of the VQ training stride.
@@ -128,11 +130,11 @@ def evaluate_codecs(checkpoint, output, *, manifest=None, contact_support=None, 
         human_extra = dict(
             HUMAN_TRANSL_L2=float((decoded["human"][valid, -3:] - target["human"][0, valid, -3:]).norm(dim=-1).mean()),
             HUMAN_V2V_690=float((pred_vertices - gt_vertices).norm(dim=-1).mean()))
-        native_contact = target["surface_contact"][0, valid].cpu().numpy() >= .5
+        native_contact = np.asarray(contact_active(target["surface_contact"][0, valid].detach().cpu().numpy()))
         geometry_contact = mesh_contacts(gt_vertices[0].cpu().numpy().astype(np.float64),
                                          target["object"][0, valid].cpu().numpy(), vertices)
         contact_report = dict(frames=len(selected), metrics={}, details={
-            "VQ_VS_NATIVE": contact_scores(decoded["contact"][valid].cpu().numpy() >= .5, native_contact),
+            "VQ_VS_NATIVE": contact_scores(np.asarray(contact_active(decoded["contact"][valid].detach().cpu().numpy())), native_contact),
             "NATIVE_VS_GT_MESH": contact_scores(native_contact, geometry_contact),
             "ALL_NEGATIVE_VS_NATIVE": contact_scores(np.zeros_like(native_contact), native_contact)})
         contact_reports.append(contact_report)

@@ -51,7 +51,7 @@ def prepare(checkpoint, output, device="cuda:0", dtype="bfloat16", modes=None,
                     temperature=temperature, top_k=top_k, text_conditioned=text_conditioned,
                     dtype=dtype, seed=seed, modes=list(modes), limit_per_split=limit,
                     normalization={key: {name: getattr(codecs.models[key], name).cpu().tolist()
-                                         for name in ("mean", "std")} for key in ("human", "object")})
+                                         for name in ("mean", "std")} for key in ("human", "object", "contact")})
     if resume and json.loads((output / "metadata.json").read_text(encoding="utf-8")) != metadata:
         raise ValueError("Cache settings/source changed; choose a new output directory")
     output.mkdir(parents=True, exist_ok=True)
@@ -68,7 +68,8 @@ def prepare(checkpoint, output, device="cuda:0", dtype="bfloat16", modes=None,
     count = 0
     for split in ("train", "val"):
         dataset = MotionDataset(cfg["manifest"], split, cfg["dataset"], saved["support_sha256"],
-                                metadata["window"], metadata["train_stride"] if split == "train" else None)
+                                metadata["window"], metadata["train_stride"] if split == "train" else None,
+                                contact_support=cfg["contact_support"], body_models=body_models)
         total = len(dataset) if limit is None else min(limit, len(dataset))
         if not total:
             raise ValueError("Need nonempty train and val splits")

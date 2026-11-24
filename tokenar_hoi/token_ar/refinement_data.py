@@ -10,6 +10,7 @@ from ..data import read_manifest
 from ..mesh_geometry import load_mesh_asset, mesh_features
 from . import MODALITIES, MODES
 from .body import digest_file, human_dim
+from .contact_offset import CONTACT_DIM
 from .data import load_record
 from .prepare_refinement import CACHE_KIND
 
@@ -69,10 +70,10 @@ class RefinementDataset:
         if not 0 <= start < end <= len(record["human_params"]):
             raise ValueError("Invalid cached window bounds")
         target = {key: torch.from_numpy(record[source][start:end].astype(np.float32).copy())
-                  for key, source in (("human", "human_params"), ("object", "object"), ("contact", "surface_contact"))}
+                  for key, source in (("human", "human_params"), ("object", "object"), ("contact", "contact_offset"))}
         with np.load(self.root / row["file"], allow_pickle=False) as archive:
             coarse = {k: torch.from_numpy(archive[k].astype(np.float32)) for k in MODALITIES}
-        for key, dim, bit in zip(MODALITIES, (human_dim(self.metadata["dataset"]), 9, 690), row["mode"]):
+        for key, dim, bit in zip(MODALITIES, (human_dim(self.metadata["dataset"]), 9, CONTACT_DIM), row["mode"]):
             if coarse[key].shape != (end - start, dim) or not torch.isfinite(coarse[key]).all():
                 raise ValueError("Invalid cached prediction")
             if bit == "0" and not torch.equal(coarse[key], target[key]):

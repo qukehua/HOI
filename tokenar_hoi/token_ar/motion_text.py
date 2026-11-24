@@ -13,6 +13,7 @@ from torch.nn import functional as F
 
 from . import MODALITIES
 from .body import digest_file, human_dim
+from .contact_offset import CONTACT_DIM
 from .data import MotionDataset
 
 KIND = "native_motion_text_evaluator_v1"
@@ -108,7 +109,7 @@ class MotionTextEvaluator(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        dims = dict(human=human_dim(config.dataset), object=9, contact=690)
+        dims = dict(human=human_dim(config.dataset), object=9, contact=CONTACT_DIM)
         self.motion = nn.ModuleDict({k: MotionEncoder(dim, config)
                                     for k, dim in (dims | {"joint": sum(dims.values())}).items()})
         self.text = nn.Sequential(nn.Linear(512, config.width), nn.GELU(), nn.Linear(config.width, config.embedding_dim))
@@ -120,7 +121,7 @@ class MotionTextEvaluator(nn.Module):
     def fit_normalization(self, dataset):
         if dataset.split != "train":
             raise ValueError("Evaluator normalization requires train split")
-        for key, source in (("human", "human_params"), ("object", "object"), ("contact", "surface_contact")):
+        for key, source in (("human", "human_params"), ("object", "object"), ("contact", "contact_offset")):
             count, total, square = 0, 0, 0
             for record in dataset.loaded:
                 x = torch.as_tensor(record[source], dtype=torch.float64)
@@ -128,7 +129,8 @@ class MotionTextEvaluator(nn.Module):
                 total, square = total + x.sum(0), square + x.square().sum(0)
             mean = total / count
             getattr(self, key + "_mean").copy_(mean.float())
-            getattr(self, key + "_std").copy_((square / count - mean.square()).clamp_min(0).sqrt().clamp_min(.05).float())
+            floor = .001 if key == "contact" else .05
+            getattr(self, key + "_std").copy_((square / count - mean.square()).clamp_min(0).sqrt().clamp_min(floor).float())
 
     def encode_motion(self, batch, view):
         keys = MODALITIES if view == "joint" else (view,)

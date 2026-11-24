@@ -36,7 +36,7 @@ TASK_PROTOCOL = {
         "C_rec": "higher",
         "C_acc": "higher; fraction, not percent",
         "c_percent": "higher; fraction of frames with any body vertex within 5cm of the object",
-        "contact": "690 surface vertices, 5cm threshold, micro counts",
+        "contact": "690 object-frame nearest points plus capped distance; binary contact is under 5cm",
         "units": "joint errors in metres; multiply by 100 for centimetres",
     },
     "human_to_object": {

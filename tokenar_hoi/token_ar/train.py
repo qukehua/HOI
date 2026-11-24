@@ -138,7 +138,8 @@ def run(config, resume=None):
     if codec_saved["manifest_sha256"] != manifest_hash:
         raise ValueError("VQ training manifest differs from AR training manifest; verify splits explicitly")
     kwargs = dict(manifest=config["manifest"], dataset=config["dataset"], support_hash=support_hash,
-                  window=config.get("window", 120))
+                  window=config.get("window", 120), contact_support=config["contact_support"],
+                  body_models=config.get("body_models", "data/smplx_models"))
     train = MotionDataset(split="train", stride=config.get("stride", 60), **kwargs)
     val = MotionDataset(split="val", **kwargs)
     if not len(train) or not len(val):

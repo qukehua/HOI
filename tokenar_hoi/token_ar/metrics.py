@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from scipy.spatial import cKDTree
 from ..geometry import rotation6d_to_matrix
+from .contact_offset import CONTACT_DIM, contact_active
 
 
 def rotation_matrices(state):
@@ -136,6 +137,13 @@ def generation_metrics(generated, reference_test, reference_train):
             "feature_frames_train": int(len(reference_train))}
 
 
+def _binary_contact(values, threshold):
+    array = np.asarray(values)
+    if array.shape[-1] == CONTACT_DIM:
+        return np.asarray(contact_active(array))
+    return array >= threshold
+
+
 def mesh_contacts(body_vertices, object_pose, object_vertices):
     rotation = rotation_matrices(object_pose)
     local = np.einsum("tji,tkj->tki", rotation, body_vertices - object_pose[:, None, :3])
@@ -193,10 +201,10 @@ def reconstruction(states, batch, geometry, mode, vertices, codec=None, threshol
         scores["OBJ_CONTACT_MESHES"] = details["OBJ_CONTACT"]["accuracy_percent"]
     if codec is not None and "contact" in states:
         if mode[2] == "0":
-            # As in TriDi: observed contact uses the actual surface target, not AE reconstruction.
-            predicted_contact = batch["surface_contact"][0, valid].cpu().numpy() >= .5
+            # As in TriDi: observed contact uses the actual surface target, not VQ reconstruction.
+            predicted_contact = _binary_contact(batch["surface_contact"][0, valid].cpu().numpy(), threshold)
         else:
-            predicted_contact = codec.decode(states["contact"])[0, valid].cpu().numpy() >= threshold
+            predicted_contact = _binary_contact(codec.decode(states["contact"])[0, valid].detach().cpu().numpy(), threshold)
         details["CONTACT_TOKEN"] = contact_scores(predicted_contact, gt_contact)
         prefix = "OBJ" if mode[1] == "1" and mode[0] == "0" else "SBJ"
         scores[prefix + "_CONTACT_TOKEN"] = details["CONTACT_TOKEN"]["accuracy_percent"]

@@ -8,9 +8,10 @@ __all__ = ["MotionDataset", "load_record"]
 
 class MotionDataset(ParametricDataset):
     def __init__(self, manifest, split, dataset, support_hash, window=120, stride=None,
-                 include_geometry=True):
+                 include_geometry=True, contact_support=None, body_models=None):
         super().__init__(manifest, split, dataset, support_hash, window, stride,
-                         text_condition=False, include_geometry=include_geometry)
+                         text_condition=False, include_geometry=include_geometry,
+                         contact_support=contact_support, body_models=body_models)
 
     def __getitem__(self, index):
         result = super().__getitem__(index)
@@ -21,7 +22,7 @@ class MotionDataset(ParametricDataset):
             captions = [entry.get("text", "")]
         selected = int(torch.randint(len(captions), ())) if self.split == "train" else 0
         result["text"] = captions[selected]
-        result["contact"] = result.pop("surface_contact")
+        result["contact"] = result.pop("contact_offset")
         result.pop("text_features")
         result.pop("text_available")
         return result

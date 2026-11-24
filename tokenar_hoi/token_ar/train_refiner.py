@@ -59,7 +59,7 @@ def run(config, resume=None):
             or {k: v.asset_hash for k, v in geometry.layers.items()} != source["body_assets"]):
         raise ValueError("Refiner geometry does not match cached AR data")
     model = ContinuousRefiner(RefinerConfig(dataset=source["dataset"], **config.get("model", {}))).to(device)
-    for key in ("human", "object"):
+    for key in ("human", "object", "contact"):
         for name in ("mean", "std"):
             value = torch.tensor(source["normalization"][key][name], device=device)
             if not torch.isfinite(value).all() or (name == "std" and (value <= 0).any()):

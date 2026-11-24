@@ -96,7 +96,8 @@ def benchmark(checkpoint, output, *, modes=None, split="val", seed=42, temperatu
                                                     geometry, device)
         cache_text = bool(refinement_saved["source"]["text_conditioned"])
         check_sampler(refinement_saved, temperature, top_k, cache_text)
-    dataset = MotionDataset(config["manifest"], split, config["dataset"], geometry.support_hash, window)
+    dataset = MotionDataset(config["manifest"], split, config["dataset"], geometry.support_hash, window,
+                             contact_support=config["contact_support"], body_models=body_models)
     if not len(dataset):
         raise ValueError("No evaluation windows")
     evaluator_model, text_dataset, figure_view = None, None, config.get("fid_view", "joint")
@@ -218,7 +219,8 @@ def benchmark(checkpoint, output, *, modes=None, split="val", seed=42, temperatu
                            "frames": int(sum(row["frames"] for row in rows))}
     train_cache = {}
     if bags:
-        train = MotionDataset(config["manifest"], "train", config["dataset"], geometry.support_hash, window)
+        train = MotionDataset(config["manifest"], "train", config["dataset"], geometry.support_hash, window,
+                               contact_support=config["contact_support"], body_models=body_models)
     for key, bag in bags.items():
         kind = bag["kind"]
         if kind not in train_cache:

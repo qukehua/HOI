@@ -100,7 +100,8 @@ def run(config, resume=None):
     torch.set_num_threads(config.get("cpu_threads", 4))
     support_hash = digest_file(config["contact_support"])
     kwargs = dict(manifest=config["manifest"], dataset=config["dataset"], support_hash=support_hash,
-                  window=config.get("window", 120), include_geometry=False)
+                  window=config.get("window", 120), include_geometry=False,
+                  contact_support=config["contact_support"], body_models=config.get("body_models", "data/smplx_models"))
     train = MotionDataset(split="train", stride=config.get("stride", 60), **kwargs)
     val = MotionDataset(split="val", **kwargs)
     if not len(train) or not len(val):

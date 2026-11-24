@@ -15,6 +15,7 @@ from .body import BodyGeometry, digest_file, standard_parameters
 from .checkpoint import load_run
 from .canonical import restore_scene
 from .codecs import canonicalize, load_codecs
+from .contact_offset import contact_active
 from .data import MotionDataset, load_record
 from .refinement import check_sampler, load_refiner
 
@@ -76,8 +77,11 @@ def sample(checkpoint, manifest, reference, output, mode, frames=120, start=0, s
     entry = next((r for r in read_manifest(manifest) if Path(r["path"]).resolve() == Path(reference).resolve()), None)
     if entry is None:
         raise ValueError("Reference must belong to the native manifest")
-    dataset = MotionDataset(manifest, entry["split"], dataset_name, geometry.support_hash, frames)
-    record = load_record(reference, dataset_name, geometry.support_hash)
+    dataset = MotionDataset(manifest, entry["split"], dataset_name, geometry.support_hash, frames,
+                             contact_support=support, body_models=body_models)
+    record = load_record(reference, dataset_name, geometry.support_hash, contact_support=support,
+                         body_models=body_models, fps=entry.get("fps"), object_mesh=entry.get("object_mesh_path"),
+                         object_mesh_scale=entry.get("object_mesh_scale", 1.), sequence_id=entry.get("sequence_id"))
     if geometry.layers[str(record["gender"])].asset_hash != str(record["body_model_sha256"]):
         raise ValueError("Body assets do not match the native reference")
     end = min(start + frames, len(record["human_params"]))
@@ -104,8 +108,9 @@ def sample(checkpoint, manifest, reference, output, mode, frames=120, start=0, s
                                     float(batch["fps"][0]), geometry, vertices)
     with torch.no_grad():
         vertices, joints = geometry(values["human"][None], batch["gender"])
+    contact = values["contact"].cpu().numpy()
     arrays = {"human_params": values["human"].cpu().numpy(), "object": values["object"].cpu().numpy(),
-              "contact_probability": values["contact"].cpu().numpy(),
+              "contact_offset": contact,
               "contact_vertices": vertices[0].cpu().numpy(), "joints73": joints[0].cpu().numpy()}
     if refiner:
         arrays.update(refiner_sha256=digest_file(refiner), refiner_path=str(refiner),
@@ -122,7 +127,7 @@ def sample(checkpoint, manifest, reference, output, mode, frames=120, start=0, s
                   support_sha256=geometry.support_hash, codec_sha256=saved["codec_sha256"],
                   sequence_id=record["sequence_id"], window_start=start, hand_source=record["hand_source"],
                   text_prompt=text, seed=seed, temperature=temperature, top_k=top_k,
-                  contact_decode_threshold=.5, contact_decoded_binary=arrays["contact_probability"] >= .5,
+                  contact_decode_threshold=.05, contact_decoded_binary=np.asarray(contact_active(contact)),
                   checkpoint_metadata_sha256=digest_file(Path(checkpoint) / "metadata.json"))
     with np.load(support, allow_pickle=False) as archive:
         arrays["contact_vertex_indices"] = archive["indices"].copy()

@@ -14,9 +14,11 @@ One backbone per dataset covers all three tasks. GRAB is not accepted by the VQ-
 
 ## Installation
 
+Training, evaluation, and inference use the `tokenar` environment.
+
 ```bash
-conda create -n hoi python=3.12 -y
-conda activate hoi
+conda create -n tokenar python=3.12 -y
+conda activate tokenar
 pip install -r requirements.txt
 ```
 
@@ -55,6 +57,7 @@ The BEHAVE corrected release contains poses only. Its meshes stay with the origi
 Convert each InterAct sequence into the parametric records used for training. The script rewrites `path` in the manifest to the exported `.npz`.
 
 ```bash
+conda activate tokenar
 python -m tokenar_hoi.token_ar.interact_convert \
   --manifest data/processed/behave_correct.jsonl \
   --output data/parametric_assets/behave/sequences \
@@ -77,6 +80,7 @@ python visualization/visualize.py grab
 **VQ-VAE.** BEHAVE reads `config/vq_behave_correct.yaml` (4 GPUs, global batch 2048). Set `gpus` to the number of visible devices and keep `batch_size` divisible by that number. OMOMO uses `config/vq_omomo.yaml`; set `manifest`, `contact_support`, and `output` to the corrected paths in the table above and to `runs/token_ar/omomo/vq_correct`.
 
 ```bash
+conda activate tokenar
 python -m tokenar_hoi.token_ar.train_codecs --config config/vq_behave_correct.yaml
 python -m tokenar_hoi.token_ar.train_codecs --config config/vq_omomo.yaml
 ```
@@ -86,6 +90,7 @@ Checkpoints are `runs/token_ar/behave/vq_correct/last.pt` and `runs/token_ar/omo
 **Backbone.** In `config/qwen35_4b_behave.yaml` and `config/qwen35_4b_omomo.yaml`, point `manifest` and `contact_support` at the corrected files, `codecs` at the corresponding `last.pt`, and `output` at `runs/token_ar/<dataset>/qwen35_4b_correct`. Training is full-parameter on 4 GPUs.
 
 ```bash
+conda activate tokenar
 accelerate launch --config_file config/accelerate_qwen35_4gpu.yaml \
   --module tokenar_hoi.token_ar.train --config config/qwen35_4b_behave.yaml
 ```
@@ -99,6 +104,7 @@ The size ablation uses the same tasks, codebooks, and hyperparameters with Qwen3
 Train the motion–text evaluator on the training split after setting its manifest to the corrected JSONL (`config/evaluator_behave.yaml`, `config/evaluator_omomo.yaml`).
 
 ```bash
+conda activate tokenar
 python -m tokenar_hoi.token_ar.train_evaluator --config config/evaluator_behave.yaml
 
 python -m tokenar_hoi.token_ar.evaluate_codecs \
@@ -120,6 +126,7 @@ python -m tokenar_hoi.token_ar.benchmark \
 ## Visualization
 
 ```bash
+conda activate tokenar
 python -m tokenar_hoi.token_ar.sample \
   --checkpoint runs/token_ar/behave/qwen35_4b_correct/checkpoint-XXXXXXX \
   --manifest data/processed/behave_correct.jsonl \

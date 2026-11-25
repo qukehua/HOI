@@ -21,11 +21,11 @@ def validate(model, dataset, device, batch_size):
     loader = DataLoader(dataset, batch_size=batch_size, generator=torch.Generator().manual_seed(0))
     for batch in loader:
         batch = move_batch(batch, device)
-        texts.append(model.encode_text(batch["text_embedding"]).cpu())
+        texts.append(model.encode_text(batch["text_embedding"], normalized=False).cpu())
         sources.extend(batch["source_id"])
         captions.extend(batch["caption_key"])
         for view in VIEWS:
-            motion[view].append(model.encode_motion(batch, view).cpu())
+            motion[view].append(model.encode_motion(batch, view, normalized=False).cpu())
     text = torch.cat(texts).numpy()
     return {view: embedding_scores(torch.cat(rows).numpy(), torch.cat(rows).numpy(), text,
                                    source_ids=sources, captions=captions)["ground_truth"]

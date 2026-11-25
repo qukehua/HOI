@@ -97,12 +97,16 @@ class MotionEncoder(nn.Module):
         self.temporal = nn.GRU(config.width, config.width, config.layers, batch_first=True, bidirectional=True)
         self.output = nn.Linear(2 * config.width, config.embedding_dim)
 
-    def forward(self, values, lengths, fps):
+    def forward(self, values, lengths, fps, *, normalized=True):
         rate = (fps / 10).log()[:, None, None].expand(-1, values.shape[1], 1)
         hidden = self.project(torch.cat((values, rate), -1))
         packed = nn.utils.rnn.pack_padded_sequence(hidden, lengths.cpu(), batch_first=True, enforce_sorted=False)
         _, hidden = self.temporal(packed)
-        return F.normalize(self.output(torch.cat((hidden[-2], hidden[-1]), -1)), dim=-1)
+        raw = self.output(torch.cat((hidden[-2], hidden[-1]), -1))
+        # Contrastive training uses the unit vector. Reported FID / R-precision /
+        # Diversity / Matching use the raw Euclidean embedding, matching the
+        # unnormalized Guo-style HOI evaluator.
+        return F.normalize(raw, dim=-1) if normalized else raw
 
 
 class MotionTextEvaluator(nn.Module):
@@ -132,13 +136,14 @@ class MotionTextEvaluator(nn.Module):
             floor = .001 if key == "contact" else .05
             getattr(self, key + "_std").copy_((square / count - mean.square()).clamp_min(0).sqrt().clamp_min(floor).float())
 
-    def encode_motion(self, batch, view):
+    def encode_motion(self, batch, view, *, normalized=True):
         keys = MODALITIES if view == "joint" else (view,)
         values = torch.cat([(batch[k] - getattr(self, k + "_mean")) / getattr(self, k + "_std") for k in keys], -1)
-        return self.motion[view](values, batch["valid_frames"].long().sum(-1), batch["fps"])
+        return self.motion[view](values, batch["valid_frames"].long().sum(-1), batch["fps"], normalized=normalized)
 
-    def encode_text(self, features):
-        return F.normalize(self.text(F.normalize(features, dim=-1)), dim=-1)
+    def encode_text(self, features, *, normalized=True):
+        projected = self.text(F.normalize(features, dim=-1))
+        return F.normalize(projected, dim=-1) if normalized else projected
 
     def loss(self, batch):
         text = self.encode_text(batch["text_embedding"])

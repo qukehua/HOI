@@ -30,8 +30,10 @@ def embedding_scores(real, predicted, text, *, source_ids, captions, seed=42, ca
         raise ValueError("Invalid retrieval protocol")
     pool = min(candidates, n)
     rng = np.random.default_rng(seed)
-    first = rng.integers(n, size=pairs)
-    second = (first + rng.integers(1, n, size=pairs)) % n
+    # Guo / HOI-Diff diversity: two independent samples without replacement.
+    times = min(pairs, n - 1)
+    first = rng.choice(n, size=times, replace=False)
+    second = rng.choice(n, size=times, replace=False)
     result = {}
     # Identical pools for GT and reconstruction, fixed size per query (no short-tail groups).
     pools = np.empty((repeats, n, pool), np.int64)
@@ -61,8 +63,9 @@ def embedding_scores(real, predicted, text, *, source_ids, captions, seed=42, ca
                             R_Precision_std={f"top{k}": float(np.std(strict, axis=0)[k - 1]) for k in (1, 2, 3)},
                             semantic_R_Precision={f"top{k}": float(np.mean(semantic, axis=0)[k - 1]) for k in (1, 2, 3)})
     result["protocol"] = dict(sequences=n, effective_candidates=pool, requested_candidates=candidates,
-                               repeats=repeats, diversity_pairs=pairs, seed=seed,
-                               ranking="text-to-motion; paired index; randomized ties; fixed candidate count per query",
+                               repeats=repeats, diversity_pairs=times, seed=seed,
+                               embedding="unnormalized Euclidean encoder outputs",
+                               ranking="text-to-motion Euclidean; paired index; randomized ties; fixed candidate count per query",
                                random_chance={f"top{k}": min(k, pool) / pool for k in (1, 2, 3)},
                                semantic_positive="same source sequence OR exact normalized caption")
     return result

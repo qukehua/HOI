@@ -55,9 +55,9 @@ def score_motion_pairs(evaluator, pairs, device, *, seed=42, candidates=32, repe
         ground = move_batch(ground, device)
         predicted = move_batch(predicted, device)
         for view in VIEWS:
-            gt[view].append(evaluator.encode_motion(ground, view).cpu())
-            pred[view].append(evaluator.encode_motion(predicted, view).cpu())
-        texts.append(evaluator.encode_text(ground["text_embedding"]).cpu())
+            gt[view].append(evaluator.encode_motion(ground, view, normalized=False).cpu())
+            pred[view].append(evaluator.encode_motion(predicted, view, normalized=False).cpu())
+        texts.append(evaluator.encode_text(ground["text_embedding"], normalized=False).cpu())
         sources.extend(ground["source_id"])
         captions.extend(ground["caption_key"])
     if len(texts) < 2:
@@ -112,9 +112,10 @@ def evaluate_motion_text(codecs, saved, checkpoint, output, *, evaluator, manife
                           "Full native-rate windows, not the 1fps geometry evaluation frames.",
                           "Only captioned sequences are included; unlabelled sequence/window exclusions are explicit.",
                           "human/object/contact use their own motion encoders; joint uses all three reconstructed streams.",
-                          "FID is sequence embedding distribution distance; Diversity should match GT, not be maximized.",
                           "R-Precision is paired text-to-motion top-k; semantic variant handles repeated captions/sources.",
                           "Check GT retrieval against random chance before trusting reconstruction scores.",
-                          "Matching Score uses mean paired Euclidean distance of unit-normalized embeddings (lower is better)."])
+                          "FID, R-precision, Diversity and Matching use unnormalized Euclidean embeddings.",
+                          "Diversity is the mean L2 of 300 independent pairs and is compared with GT, not maximized.",
+                          "Matching Score is mean paired Euclidean distance (lower is better)."])
     write_json(output / "summary.json", summary)
     return summary

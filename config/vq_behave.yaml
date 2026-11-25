@@ -1,6 +1,6 @@
 architecture: token_ar_v1
 dataset: behave
-manifest: data/processed/behave_correct.jsonl
+manifest: data/processed/behave_correct_evaluator.jsonl
 contact_support: data/parametric_assets/behave/contact_support.npz
 seed: 42
 cpu_threads: 4
@@ -8,17 +8,19 @@ window: 120
 stride: 60
 output: runs/token_ar/behave/vq_correct
 device: cuda:0
-gpus: 4
-batch_size: 2048
+gpus: 1
+batch_size: 512
 max_steps: 150000
 modality_steps:
   human: 150000
   object: 100000
   contact: 100000
 learning_rate: 0.0002
-# best.pt is the lowest validation geometry score: joint cm + object translation cm
-# + object rotation deg + 100 * (1 - contact F1). No text evaluator.
-select_by_geometry: true
+# best.pt is the lowest validation joint FID from the frozen motion-text evaluator.
+select_by_geometry: false
+select_by_fid: true
+fid_view: joint
+motion_text_evaluator: runs/token_ar/behave/motion_text_evaluator/last.pt
 validate_every: 1000
 validation_batches: 16
 log_every: 20

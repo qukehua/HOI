@@ -1,5 +1,5 @@
 dataset: behave
-manifest: data/processed/behave_parametric.jsonl
+manifest: data/processed/behave_correct_evaluator.jsonl
 contact_support: data/parametric_assets/behave/contact_support.npz
 output: runs/token_ar/behave/motion_text_evaluator
 device: cuda:0

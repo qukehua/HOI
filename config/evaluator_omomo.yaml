@@ -1,8 +1,9 @@
+# Test is the official OMOMO holdout (sub16, sub17). sub15 is the validation subject.
 dataset: omomo
-manifest: data/processed/omomo_parametric.jsonl
+manifest: data/processed/omomo_correct_evaluator.jsonl
 contact_support: data/parametric_assets/omomo/contact_support.npz
 output: runs/token_ar/omomo/motion_text_evaluator
-device: cuda:0
+device: cuda:1
 seed: 42
 cpu_threads: 4
 window: 120

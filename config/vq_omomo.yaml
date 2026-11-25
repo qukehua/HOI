@@ -9,11 +9,11 @@ stride: 60
 output: runs/token_ar/omomo/vq_residual_ema_512x4096
 device: cuda:0
 batch_size: 128
-max_steps: 1500000
+max_steps: 150000
 modality_steps:
-  human: 1500000
-  object: 1000000
-  contact: 1000000
+  human: 150000
+  object: 100000
+  contact: 100000
 motion_text_evaluator: runs/token_ar/omomo/motion_text_evaluator/last.pt
 learning_rate: 0.0002
 validate_every: 1000

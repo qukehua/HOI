@@ -10,11 +10,11 @@ output: runs/token_ar/behave/vq_correct
 device: cuda:0
 gpus: 4
 batch_size: 2048
-max_steps: 1500000
+max_steps: 150000
 modality_steps:
-  human: 1500000
-  object: 1000000
-  contact: 1000000
+  human: 150000
+  object: 100000
+  contact: 100000
 learning_rate: 0.0002
 # best.pt is the lowest validation geometry score: joint cm + object translation cm
 # + object rotation deg + 100 * (1 - contact F1). No text evaluator.

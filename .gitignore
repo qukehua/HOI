@@ -24,3 +24,4 @@ build/
 /OMOMO.rar
 # GitHub rejects a single file larger than 100MB.
 /InterAct.zip
+data.tar.gz

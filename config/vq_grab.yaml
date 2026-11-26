@@ -1,0 +1,47 @@
+architecture: token_ar_v1
+dataset: grab
+manifest: data/processed/grab_correct_evaluator.jsonl
+contact_support: data/parametric_assets/grab/contact_support.npz
+seed: 42
+cpu_threads: 4
+window: 120
+stride: 60
+output: runs/token_ar/grab/vq_correct
+device: cuda:2
+gpus: 1
+batch_size: 512
+max_steps: 150000
+modality_steps:
+  human: 150000
+  object: 100000
+  contact: 100000
+learning_rate: 0.0002
+# best.pt is the lowest validation joint FID from the frozen motion-text evaluator.
+select_by_geometry: false
+select_by_fid: true
+fid_view: joint
+motion_text_evaluator: runs/token_ar/grab/motion_text_evaluator/last.pt
+validate_every: 1000
+validation_batches: 16
+log_every: 20
+use_swanlab: true
+swanlab_project: HOI
+swanlab_run_name: grab_vq_t2m
+swanlab_mode: online
+# Human objective follows T2M-GPT: one Smooth L1 on the normalized pose
+# (root rotation, body, hands, translation; beta excluded), one velocity
+# term on that vector's frame difference, plus commitment.
+codec:
+  canonical_scene: true
+  codebook_size: 512
+  latent_dim: 4096
+  width: 512
+  network: residual
+  quantizer: ema
+  depth: 3
+  dilation_growth: 3
+  ema_decay: 0.99
+  ema_reset_threshold: 1.0
+  stride: 2
+  commitment_weight: 0.25
+  velocity_weight: 0.1

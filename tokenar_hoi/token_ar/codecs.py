@@ -32,7 +32,7 @@ class CodecConfig:
     ema_reset_threshold: float = 1.
 
     def __post_init__(self):
-        if self.dataset not in ("behave", "omomo"):
+        if self.dataset not in ("behave", "omomo", "grab"):
             raise ValueError("Unknown dataset")
         if min(self.codebook_size, self.latent_dim, self.width, self.stride) < 1:
             raise ValueError("Codec dimensions must be positive")

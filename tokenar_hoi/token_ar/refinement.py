@@ -30,7 +30,7 @@ class RefinerConfig:
     contact_softness: float = .01
 
     def __post_init__(self):
-        if self.dataset not in ("behave", "omomo") or min(self.width, self.layers) < 1:
+        if self.dataset not in ("behave", "omomo", "grab") or min(self.width, self.layers) < 1:
             raise ValueError("Invalid refiner architecture")
         if not all(math.isfinite(v) and v > 0 for v in (self.contact_threshold, self.contact_softness)):
             raise ValueError("Contact distance settings must be positive metres")

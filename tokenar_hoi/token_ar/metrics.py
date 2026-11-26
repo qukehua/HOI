@@ -216,6 +216,7 @@ def reconstruction(states, batch, geometry, mode, vertices, codec=None, threshol
             "body_model": "smplh" if geometry.dataset == "behave" else "smplx",
             "evaluation_joints": 73, "contact_vertices": 690, "support_sha256": geometry.support_hash,
             "units": "metres; contacts percent; rotation degrees",
-            "smplx_joint_mapping": "body22+hand30+vertex_landmarks21; face-only joints excluded" if geometry.dataset == "omomo" else None,
+            "smplx_joint_mapping": ("body22+hand30+vertex_landmarks21; face-only joints excluded"
+                                   if geometry.dataset != "behave" else None),
             "directly_comparable_to_paper_table": False}
 

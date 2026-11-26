@@ -41,7 +41,7 @@ def split_human(human, dataset):
 
 def native_rotations(pose6, dataset):
     rotations = rotation6d_to_matrix(pose6)
-    if dataset == "omomo":
+    if DATASET_MODELS[dataset] == "smplx":
         identity = torch.eye(3, device=pose6.device, dtype=pose6.dtype)
         neutral = identity.expand(*pose6.shape[:-2], 3, 3, 3)
         rotations = torch.cat((rotations[..., :22, :, :], neutral, rotations[..., 22:, :, :]), -3)
@@ -49,7 +49,7 @@ def native_rotations(pose6, dataset):
 
 
 def canonical_joint_indices(dataset):
-    return list(range(52)) if dataset == "behave" else list(range(22)) + list(range(25, 55))
+    return list(range(52)) if DATASET_MODELS[dataset] == "smplh" else list(range(22)) + list(range(25, 55))
 
 
 
@@ -138,7 +138,8 @@ def decode_full(human, dataset, gender, models=DEFAULT_MODEL_PATH):
         rotation = rotation6d_to_matrix(pose)
         out = layer(betas=beta, transl=trans, global_orient=rotation[:, :1], body_pose=rotation[:, 1:22],
                     left_hand_pose=rotation[:, 22:37], right_hand_pose=rotation[:, 37:52], pose2rot=False)
-        indices = list(range(73)) if dataset == "behave" else canonical_joint_indices(dataset) + list(range(55, 76))
+        indices = (list(range(73)) if DATASET_MODELS[dataset] == "smplh"
+                   else canonical_joint_indices(dataset) + list(range(55, 76)))
         vertices.append(out.vertices.numpy())
         joints.append(out.joints[:, indices].numpy())
     return np.concatenate(vertices), np.asarray(layer.faces, np.int64), np.concatenate(joints)
@@ -155,7 +156,7 @@ def standard_parameters(human, dataset):
     result = {"betas": beta.numpy(), "global_orient": aa[:, 0], "body_pose": aa[:, 1:22].reshape(-1, 63),
               "left_hand_pose": aa[:, 22:37].reshape(-1, 45), "right_hand_pose": aa[:, 37:52].reshape(-1, 45),
               "transl": trans.numpy()}
-    if dataset == "omomo":
+    if DATASET_MODELS[dataset] == "smplx":
         result.update(expression=np.zeros((len(human), 10), np.float32),
                       jaw_pose=np.zeros((len(human), 3), np.float32),
                       leye_pose=np.zeros((len(human), 3), np.float32), reye_pose=np.zeros((len(human), 3), np.float32))

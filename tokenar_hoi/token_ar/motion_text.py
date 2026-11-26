@@ -84,7 +84,7 @@ class EvaluatorConfig:
     temperature: float = .07
 
     def __post_init__(self):
-        if self.dataset not in ("behave", "omomo") or min(self.width, self.embedding_dim, self.layers) < 1:
+        if self.dataset not in ("behave", "omomo", "grab") or min(self.width, self.embedding_dim, self.layers) < 1:
             raise ValueError("Invalid motion-text evaluator configuration")
         if self.temperature <= 0:
             raise ValueError("Temperature must be positive")

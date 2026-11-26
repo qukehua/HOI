@@ -3,7 +3,7 @@ import numpy as np
 
 
 BODY_METADATA_KEYS = ("body_model_type", "gender", "betas", "body_dataset")
-DATASET_MODELS = {"omomo": "smplx", "behave": "smplh"}
+DATASET_MODELS = {"omomo": "smplx", "behave": "smplh", "grab": "smplx"}
 MODEL_BETAS = {"smplx": 16, "smplh": 10}
 
 
@@ -15,7 +15,7 @@ def body_model_settings(dataset=None, model_type=None):
         raise ValueError(f"{dataset} requires {expected}, not {model_type}")
     model_type = model_type or expected
     if model_type not in MODEL_BETAS:
-        raise ValueError("Specify dataset='omomo'/'behave' or model_type='smplx'/'smplh'; "
+        raise ValueError("Specify dataset='omomo'/'behave'/'grab' or model_type='smplx'/'smplh'; "
                          "22 joints alone do not identify the body model")
     return model_type, MODEL_BETAS[model_type]
 

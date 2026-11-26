@@ -25,7 +25,7 @@ def load_record(path, dataset=None, support_hash=None, *, contact_support=None, 
         with np.load(path, allow_pickle=False) as archive:
             r = dict(archive)
     name = str(r.get("dataset"))
-    if name not in ("behave", "omomo") or (dataset and name != dataset):
+    if name not in DATASET_MODELS or (dataset and name != dataset):
         raise ValueError("Dataset isolation violation")
     if str(r.get("representation")) != REPRESENTATION:
         raise ValueError("Expected parametric_v1 record; prepare native data first")
